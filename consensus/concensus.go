@@ -7,13 +7,6 @@ import (
 // ConsensusType represents the type of consensus algorithm
 type ConsensusType string
 
-const (
-	// PBFT represents the Practical Byzantine Fault Tolerance consensus
-	PBFT ConsensusType = "PBFT"
-	// DPOS represents the Delegated Proof of Stake consensus
-	DPOS ConsensusType = "DPOS"
-)
-
 // Message represents a consensus message
 type Message struct {
 	Type      string `json:"type"`

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"tripcodechain_go/blockchain"
+	"tripcodechain_go/consensus"
 	"tripcodechain_go/mempool"
 	"tripcodechain_go/p2p"
 	"tripcodechain_go/utils"
@@ -19,6 +20,10 @@ func main() {
 	// Configure logging
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
 	log.SetOutput(os.Stdout)
+
+	const (
+		DPOS = "DPOS"
+	)
 
 	// Parse command line flags
 	portFlag := flag.Int("port", 3000, "Port to listen on")
@@ -31,6 +36,12 @@ func main() {
 	// Create a new node
 	node := p2p.NewNode(*portFlag)
 	utils.PrintStartupMessage(node.ID, *portFlag)
+
+	consensus, err := consensus.NewConsensus(DPOS, node.ID)
+	if err != nil {
+		log.Fatal("Error inicializando consenso:", err)
+	}
+	utils.LogInfo("Consenso %s inicializado", consensus.GetType())
 
 	// Initialize blockchain for transactions
 	txChain := blockchain.NewBlockchain(blockchain.TransactionBlock)
