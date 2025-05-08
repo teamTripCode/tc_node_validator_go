@@ -4,6 +4,7 @@ package utils
 import (
 	"fmt"
 	"log"
+	"math/rand"
 )
 
 // Global verbose flag
@@ -44,6 +45,12 @@ func Contains(slice []string, item string) bool {
 		}
 	}
 	return false
+}
+
+// NewSeededRand creates a new seeded random number generator
+func NewSeededRand(seed int64) *rand.Rand {
+	source := rand.NewSource(seed)
+	return rand.New(source)
 }
 
 // PrintStartupMessage prints a formatted startup message
