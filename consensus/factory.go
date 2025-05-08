@@ -9,8 +9,8 @@ func NewConsensus(consensusType ConsensusType, nodeID string) (Consensus, error)
 	switch consensusType {
 	case "DPOS":
 		c = NewDPoS()
-	// case "PBFT":
-	// 	c = NewPBFT()
+	case "PBFT":
+		c = NewPBFT()
 	default:
 		return nil, fmt.Errorf("tipo de consenso no soportado: %s", consensusType)
 	}

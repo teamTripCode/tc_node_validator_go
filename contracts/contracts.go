@@ -16,7 +16,7 @@ import (
 )
 
 // ContractState represents the state of a contract
-type ContractState map[string]interface{}
+type ContractState map[string]any
 
 // ContractOperation defines an operation that can be executed in a contract
 type ContractOperation struct {
