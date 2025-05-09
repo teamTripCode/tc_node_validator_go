@@ -11,6 +11,8 @@ import (
 
 	"tripcodechain_go/blockchain"
 	"tripcodechain_go/consensus"
+	"tripcodechain_go/contracts"
+	"tripcodechain_go/currency"
 	"tripcodechain_go/mempool"
 	"tripcodechain_go/p2p"
 	"tripcodechain_go/utils"
@@ -46,6 +48,13 @@ func main() {
 	// Initialize blockchain for transactions
 	txChain := blockchain.NewBlockchain(blockchain.TransactionBlock)
 	utils.LogInfo("Transaction blockchain initialized with %d blocks", txChain.GetLength())
+
+	currency.InitNativeToken(txChain, "TC", 1000000) // 1 millón de unidades iniciales
+	utils.LogInfo("Native currency TripCoin initialized")
+
+	// Desplegar contratos base del sistema
+	contracts.DeploySystemContracts(txChain)
+	utils.LogInfo("System contracts deployed")
 
 	// Initialize blockchain for critical processes
 	criticalChain := blockchain.NewBlockchain(blockchain.CriticalProcessBlock)

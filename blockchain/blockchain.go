@@ -1,7 +1,15 @@
 package blockchain
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"math/big"
 	"sync"
+	"time"
+	"tripcodechain_go/currency"
+	"tripcodechain_go/utils"
 )
 
 /**
@@ -14,6 +22,322 @@ type Blockchain struct {
 	blockType  BlockType    // Type of blocks this blockchain accepts
 	difficulty int          // Mining difficulty (number of leading zeros required)
 	mutex      sync.RWMutex // Mutex to ensure thread-safe access to the blockchain
+}
+
+// Códigos de operación para el lenguaje del contrato
+const (
+	OpStore       = "STORE"
+	OpRequire     = "REQUIRE"
+	OpCompare     = "COMPARE"
+	OpCaller      = "CALLER"
+	OpArgs        = "ARGS"
+	OpEmitEvent   = "EMIT_EVENT"
+	OpTransfer    = "TRANSFER"
+	OpNativeCall  = "NATIVE_CALL"
+	OpResult      = "RESULT"
+	OpTimestamp   = "TIMESTAMP"
+	OpBlockNumber = "BLOCK_NUMBER"
+)
+
+/**
+ * SystemContract represents a contract deployed on the blockchain.
+ * These contracts handle system-level functionality like rewards,
+ * validator management, and blockchain governance.
+ */
+type SystemContract struct {
+	Name      string            // Name of the contract
+	Address   string            // Unique identifier for the contract
+	State     map[string]string // Contract's state variables
+	CreatedAt time.Time         // Time when contract was deployed
+}
+
+// Balance representa un saldo de moneda en la blockchain
+// ContractManager gestiona la creación y ejecución de contratos
+type ContractManager struct {
+	contracts       map[string]*Contract
+	currencyManager *currency.CurrencyManager
+}
+
+// ContractOperation representa una operación en el código del contrato
+type ContractOperation struct {
+	OpCode string
+	Args   []interface{}
+}
+
+// ContractState representa el estado de un contrato
+type ContractState map[string]string
+
+// Contract representa un contrato inteligente en la blockchain
+type Contract struct {
+	Address     string
+	Creator     string
+	Code        []*ContractOperation
+	State       ContractState
+	Balance     *currency.Balance
+	CreatedAt   time.Time
+	LastUpdated time.Time
+}
+
+/**
+ * NewSystemContract creates a new system contract.
+ *
+ * Parameters:
+ *   - name: Name of the contract
+ *
+ * Returns:
+ *   - A pointer to the newly created system contract
+ */
+func NewSystemContract(name string) *SystemContract {
+	// Generate a unique address based on name and timestamp
+	timestamp := time.Now().UnixNano()
+	addressInput := name + string(rune(timestamp))
+	hash := sha256.Sum256([]byte(addressInput))
+	address := hex.EncodeToString(hash[:])
+
+	return &SystemContract{
+		Name:      name,
+		Address:   address,
+		State:     make(map[string]string),
+		CreatedAt: time.Now(),
+	}
+}
+
+// NewContractManager crea una nueva instancia de ContractManager
+func NewContractManager(currencyManager *currency.CurrencyManager) *ContractManager {
+	return &ContractManager{
+		contracts:       make(map[string]*Contract),
+		currencyManager: currencyManager,
+	}
+}
+
+// CreateContract crea un nuevo contrato en la blockchain
+// CreateContract crea un nuevo contrato en la blockchain
+func (cm *ContractManager) CreateContract(creator string, code []*ContractOperation, initialState ContractState, initialBalance *currency.Balance) (*Contract, error) {
+	// Verificar que el creador tiene suficientes fondos
+	if initialBalance.Cmp(big.NewInt(0)) > 0 {
+		// Determine which version of GetBalance to use based on how it's implemented in CurrencyManager
+
+		// Option 1: If GetBalance returns only a balance (no error)
+		creatorBalance := cm.currencyManager.GetBalance(creator)
+
+		// Compare creator's balance with the initial balance required
+		if creatorBalance.Cmp(initialBalance.Int) < 0 {
+			return nil, errors.New("fondos insuficientes para crear contrato")
+		}
+
+		// Transferir fondos al contrato
+		err := cm.currencyManager.TransferFunds(creator, "contract_creation", initialBalance)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Generar dirección del contrato
+	contractAddress := generateContractAddress(creator, code, time.Now().UnixNano())
+
+	// Crear el contrato
+	contract := &Contract{
+		Address:     contractAddress,
+		Creator:     creator,
+		Code:        code,
+		State:       initialState,
+		Balance:     initialBalance,
+		CreatedAt:   time.Now(),
+		LastUpdated: time.Now(),
+	}
+
+	// Registrar el contrato
+	cm.contracts[contractAddress] = contract
+
+	return contract, nil
+}
+
+// GetContract devuelve un contrato por su dirección
+func (cm *ContractManager) GetContract(address string) (*Contract, error) {
+	contract, exists := cm.contracts[address]
+	if !exists {
+		return nil, errors.New("contrato no encontrado")
+	}
+	return contract, nil
+}
+
+// generateContractAddress genera una dirección única para un contrato
+func generateContractAddress(creator string, code []*ContractOperation, timestamp int64) string {
+	// En una implementación real, esto usaría hash criptográficos
+	return fmt.Sprintf("contract_%s_%d", creator[:8], timestamp)
+}
+
+// OpBalanceOf crea una operación para consultar el balance de una dirección
+func OpBalanceOf(address interface{}) string {
+	return fmt.Sprintf("BALANCE_OF(%v)", address)
+}
+
+// Añadir métodos a la estructura Blockchain para soportar contratos
+
+// GetCurrencyManager devuelve el gestor de moneda de la blockchain
+func (bc *Blockchain) GetCurrencyManager() *currency.CurrencyManager {
+	// En una implementación real, esto estaría almacenado como campo en la estructura Blockchain
+	// Para este ejemplo, creamos uno nuevo
+	return currency.NewCurrencyManager()
+}
+
+// RegisterSystemContract registra un contrato como contrato del sistema
+func (bc *Blockchain) RegisterSystemContract(name string, address string) {
+	// En una implementación real, esto almacenaría el contrato en una estructura de datos persistente
+	utils.LogInfo("Registrando contrato del sistema: %s en dirección %s", name, address)
+
+	// Añadir un bloque a la cadena para registrar este evento
+	newBlock := bc.CreateBlock()
+	newBlock.Data = fmt.Sprintf("RegisterSystemContract:%s:%s", name, address)
+	newBlock.ForgeBlock("system_registration")
+	bc.AddBlock(newBlock)
+}
+
+// DeploySystemContracts despliega todos los contratos del sistema
+func DeploySystemContracts(chain *Blockchain) {
+	// Obtener el CurrencyManager de la blockchain
+	currencyManager := chain.GetCurrencyManager()
+
+	// Crear ContractManager
+	contractManager := NewContractManager(currencyManager)
+
+	// 1. Contrato de Gobernanza
+	deployGovernanceContract(contractManager, chain)
+
+	// 2. Registro de Validadores
+	deployValidatorRegistry(contractManager, chain)
+
+	// 3. Sistema de Recompensas
+	deployRewardsSystem(contractManager, chain)
+
+	utils.LogInfo("Sistema de contratos base desplegado")
+}
+
+func deployGovernanceContract(cm *ContractManager, chain *Blockchain) {
+	// Código del contrato de gobernanza
+	governanceCode := []*ContractOperation{
+		{
+			OpCode: "METHOD",
+			Args:   []interface{}{"propose", "Crear nueva propuesta", true},
+		},
+		{
+			OpCode: OpRequire,
+			Args:   []interface{}{"caller == creator", OpCompare, OpCaller, "$creator"},
+		},
+		{
+			OpCode: OpStore,
+			Args:   []interface{}{"proposals.$id", 0},
+		},
+		{
+			OpCode: OpEmitEvent,
+			Args:   []interface{}{"ProposalCreated", map[string]interface{}{"id": 0}},
+		},
+	}
+
+	// Estado inicial del contrato
+	initialState := ContractState{
+		"voting_delay":      "172800", // 2 días en bloques
+		"voting_period":     "259200", // 3 días en bloques
+		"proposal_count":    "0",
+		"quorum_percentage": "4", // 4% del total de TCC
+	}
+
+	// Desplegar contrato
+	contract, err := cm.CreateContract(
+		"GENESIS_ACCOUNT",
+		governanceCode,
+		initialState,
+		currency.NewBalance(0),
+	)
+
+	if err != nil {
+		utils.LogError("Error desplegando contrato de gobernanza: %v", err)
+	}
+
+	chain.RegisterSystemContract("governance", contract.Address)
+	utils.LogInfo("Contrato de Gobernanza desplegado: %s", contract.Address)
+}
+
+func deployValidatorRegistry(cm *ContractManager, chain *Blockchain) {
+	// Código del registro de validadores
+	validatorCode := []*ContractOperation{
+		{
+			OpCode: "METHOD",
+			Args:   []interface{}{"register", "Registrar nuevo validador", true},
+		},
+		{
+			OpCode: OpRequire,
+			Args:   []interface{}{"balance >= 100 TCC", OpCompare, OpBalanceOf(OpCaller), "100000000000000000000"},
+		},
+		{
+			OpCode: OpStore,
+			Args: []interface{}{"validators.$caller", map[string]interface{}{
+				"stake":      "ARGS[0]",
+				"status":     "active",
+				"registered": OpTimestamp,
+			}},
+		},
+		{
+			OpCode: OpEmitEvent,
+			Args:   []interface{}{"ValidatorRegistered", map[string]interface{}{"address": OpCaller}},
+		},
+	}
+
+	contract, err := cm.CreateContract(
+		"GENESIS_ACCOUNT",
+		validatorCode,
+		ContractState{"min_stake": "100000000000000000000"}, // 100 TCC en wei
+		currency.NewBalance(0),
+	)
+
+	if err != nil {
+		utils.LogError("Error desplegando registro de validadores: %v", err)
+	}
+
+	chain.RegisterSystemContract("validators", contract.Address)
+	utils.LogInfo("Registro de Validadores desplegado: %s", contract.Address)
+}
+
+func deployRewardsSystem(cm *ContractManager, chain *Blockchain) {
+	// Código del sistema de recompensas
+	rewardsCode := []*ContractOperation{
+		{
+			OpCode: "METHOD",
+			Args:   []interface{}{"distribute", "Distribuir recompensas", true},
+		},
+		{
+			OpCode: OpNativeCall,
+			Args:   []interface{}{"get_block_producer"},
+		},
+		{
+			OpCode: OpTransfer,
+			Args:   []interface{}{OpResult, "2000000000000000000"}, // 2 TCC
+		},
+		{
+			OpCode: OpEmitEvent,
+			Args: []interface{}{"RewardsDistributed", map[string]interface{}{
+				"block":     OpBlockNumber,
+				"validator": OpResult,
+				"amount":    "2000000000000000000",
+			}},
+		},
+	}
+
+	// Crear el contrato con balance inicial
+	initialBalance, _ := new(big.Int).SetString("100000000000000000000", 10) // 100 TCC
+	contract, err := cm.CreateContract(
+		"GENESIS_ACCOUNT",
+		rewardsCode,
+		ContractState{"reward_per_block": "2000000000000000000"},
+		currency.NewBalanceFromBigInt(initialBalance),
+	)
+
+	if err != nil {
+		utils.LogError("Error desplegando sistema de recompensas: %v", err)
+	}
+
+	chain.RegisterSystemContract("rewards", contract.Address)
+	utils.LogInfo("Sistema de Recompensas desplegado: %s", contract.Address)
 }
 
 /**

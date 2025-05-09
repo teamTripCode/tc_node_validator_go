@@ -3,12 +3,14 @@ package consensus
 
 import (
 	"fmt"
+	"math/big"
 	"math/rand"
 	"sync"
 	"time"
 
 	"slices"
 	"tripcodechain_go/blockchain"
+	"tripcodechain_go/currency"
 	"tripcodechain_go/utils"
 )
 
@@ -44,10 +46,12 @@ type DPoS struct {
 	RewardPool      float64                  // Total available rewards in the pool
 	mutex           sync.RWMutex             // Mutex for thread safety
 	initialized     bool                     // Whether the DPoS has been initialized
+	currencyManager *currency.CurrencyManager
+	validators      map[string]*big.Int // Validadores y su stake
 }
 
 // NewDPoS creates a new DPoS consensus instance
-func NewDPoS() *DPoS {
+func NewDPoS(currency *currency.CurrencyManager) *DPoS {
 	return &DPoS{
 		Delegates:       make(map[string]*DelegateInfo),
 		ActiveDelegates: make([]string, 0),
@@ -56,7 +60,40 @@ func NewDPoS() *DPoS {
 		StakeByNodeID:   make(map[string]float64), // Initialize stake map
 		VotesByNodeID:   make(map[string]string),  // Initialize votes map
 		RewardPool:      1000.0,                   // Initial reward pool
+		currencyManager: currency,
+		validators:      make(map[string]*big.Int),
 	}
+}
+
+func (d *DPoS) AddValidator(address string) {
+	stake := d.currencyManager.GetStake(address).Int
+	minimumStakeFloat := big.NewFloat(currency.MinimumStake)
+	minimumStake := new(big.Int)
+	minimumStakeFloat.Int(minimumStake)
+	if stake.Cmp(minimumStake) >= 0 {
+		d.validators[address] = stake
+	}
+}
+
+func (d *DPoS) selectBlockProducer() string {
+	// El validador con mayor stake produce el bloque
+	var selected string
+	maxStake := big.NewInt(0)
+
+	for addr, stake := range d.validators {
+		if stake.Cmp(maxStake) > 0 {
+			maxStake = stake
+			selected = addr
+		}
+	}
+
+	return selected
+}
+
+func (d *DPoS) SlashValidator(address string, amount *currency.Balance) {
+	// Quemar parte del stake por mal comportamiento
+	d.currencyManager.BurnTokens(address, amount)
+	delete(d.validators, address)
 }
 
 // Initialize sets up the DPoS consensus algorithm

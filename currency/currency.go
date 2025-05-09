@@ -1,4 +1,3 @@
-// currency/currency.go
 package currency
 
 import (
@@ -7,25 +6,28 @@ import (
 	"sync"
 	"time"
 
+	"tripcodechain_go/blockchain"
 	"tripcodechain_go/utils"
 )
 
 // Defines the precision for TripCoin calculations
 const (
 	// TCCDecimals represents decimal precision for TripCoin (similar to Ether's 18 decimals)
-	TCCDecimals = 18
+	TCCDecimals    = 18
+	DefaultSystem  = "TCC"
+	GenesisAddress = "GENESIS_ACCOUNT"
 
-	// Denominations in TCC
-	Wei      = 1
-	GWei     = 1e9
-	TripCoin = 1e18 // Base unit (1 TCC)
+	// Denominaciones en TCC
+	Quark    = 1    // Unidad atómica base
+	Proton   = 1e9  // 1 billón de Quark
+	TripCoin = 1e18 // Unidad estándar (1 TCC)
 
 	// Initial supply and parameters
 	InitialSupply   = 1000000 * TripCoin // 1 million TCC initial supply
 	BlockReward     = 2 * TripCoin       // 2 TCC per block reward
 	MinimumStake    = 100 * TripCoin     // 100 TCC minimum stake for validators
-	MinimumGasPrice = 1 * GWei           // 1 GWei minimum gas price
-	DefaultGasPrice = 20 * GWei          // 20 GWei default gas price
+	MinimumGasPrice = 1 * Proton         // 1 Proton minimum gas price
+	DefaultGasPrice = 20 * Proton        // 20 Proton default gas price
 	DefaultGasLimit = 21000              // Default gas limit for basic transactions
 
 	// Contract execution costs
@@ -56,11 +58,13 @@ type Account struct {
 
 // CurrencyManager manages TripCoin balances and accounts
 type CurrencyManager struct {
-	accounts      map[string]*Account // Map of account addresses to accounts
-	totalSupply   *Balance            // Total supply of TripCoin
-	mutex         sync.RWMutex        // Mutex for thread-safe operations
-	reservedFunds *Balance            // Funds reserved for system operations
-	gasParameters GasParameters       // Gas pricing parameters
+	symbol           string
+	genesisAllocated bool
+	accounts         map[string]*Account // Map of account addresses to accounts
+	totalSupply      *Balance            // Total supply of TripCoin
+	mutex            sync.RWMutex        // Mutex for thread-safe operations
+	reservedFunds    *Balance            // Funds reserved for system operations
+	gasParameters    GasParameters       // Gas pricing parameters
 }
 
 // GasParameters stores gas-related parameters
@@ -69,6 +73,46 @@ type GasParameters struct {
 	NetworkGasPrice   *Balance  // Current network gas price
 	BaseFeeMultiplier float64   // Multiplier for base fee calculation
 	LastUpdated       time.Time // Last time gas price was updated
+}
+
+func InitNativeToken(chain *blockchain.Blockchain, symbol string, initialSupply int) *CurrencyManager {
+	// Convertir suministro inicial a unidades base (Quark)
+	supplyInQuark := new(big.Int).Mul(
+		big.NewInt(int64(initialSupply)),
+		big.NewInt(TripCoin), // TripCoin = 1e18
+	)
+
+	// Crear el CurrencyManager con parámetros personalizados
+	cm := &CurrencyManager{
+		symbol:           symbol,
+		accounts:         make(map[string]*Account),
+		totalSupply:      &Balance{supplyInQuark},
+		genesisAllocated: false,
+		// ... (inicializar otros campos como en NewCurrencyManager)
+	}
+
+	// Distribución inicial (95% a cuenta génesis, 5% reservado)
+	reservedPercentage := 0.05
+	reservedAmount := new(big.Int).Div(
+		new(big.Int).Mul(supplyInQuark, big.NewInt(int64(reservedPercentage*100))),
+		big.NewInt(100),
+	)
+
+	// Asignar fondos a la cuenta génesis
+	genesisBalance := new(big.Int).Sub(supplyInQuark, reservedAmount)
+	cm.accounts[GenesisAddress] = &Account{
+		Address:      GenesisAddress,
+		Balance:      &Balance{genesisBalance},
+		Nonce:        0,
+		CreatedAt:    time.Now().UTC().Format(time.RFC3339),
+		LastActivity: time.Now().UTC().Format(time.RFC3339),
+	}
+
+	utils.LogInfo("Native token %s initialized:", symbol)
+	utils.LogInfo("- Total supply: %s", cm.totalSupply.TripCoinString())
+	utils.LogInfo("- Genesis account balance: %s", cm.accounts[GenesisAddress].Balance.TripCoinString())
+
+	return cm
 }
 
 // NewBalance creates a new Balance with the given int64 value
@@ -84,6 +128,13 @@ func NewBalanceFromString(amount string) (*Balance, error) {
 		return nil, fmt.Errorf("invalid balance amount: %s", amount)
 	}
 	return &Balance{n}, nil
+}
+
+func NewBalanceFromBigInt(amount *big.Int) *Balance {
+	if amount == nil {
+		return &Balance{big.NewInt(0)}
+	}
+	return &Balance{new(big.Int).Set(amount)}
 }
 
 // String returns the string representation of the Balance

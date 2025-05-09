@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"tripcodechain_go/blockchain"
 	"tripcodechain_go/currency"
 	"tripcodechain_go/utils"
 )
@@ -135,6 +136,164 @@ const (
 	GasCostCompute      = 5    // Cost per arithmetic operation
 	GasCostContractCall = 1000 // Base cost for calling another contract
 )
+
+// Helpers para operaciones comunes
+var (
+	OpCaller      = &ContractOperation{OpCode: OpNativeCall, Args: []interface{}{"caller"}}
+	OpTimestamp   = &ContractOperation{OpCode: OpNativeCall, Args: []interface{}{"timestamp"}}
+	OpBlockNumber = &ContractOperation{OpCode: OpNativeCall, Args: []interface{}{"block_number"}}
+	OpArgs        = func(index int) *ContractOperation {
+		return &ContractOperation{OpCode: OpLoad, Args: []interface{}{fmt.Sprintf("args.%d", index)}}
+	}
+	OpResult    = "result" // Define OpResult as a placeholder for operation results
+	OpBalanceOf = func(address interface{}) *ContractOperation {
+		return &ContractOperation{OpCode: OpNativeCall, Args: []interface{}{"balance", address}}
+	}
+)
+
+func DeploySystemContracts(chain *blockchain.Blockchain) {
+	// Obtener el CurrencyManager de la blockchain
+	currencyManager := chain.GetCurrencyManager()
+
+	// Crear ContractManager
+	contractManager := NewContractManager(currencyManager)
+
+	// 1. Contrato de Gobernanza
+	deployGovernanceContract(contractManager, chain)
+
+	// 2. Registro de Validadores
+	deployValidatorRegistry(contractManager, chain)
+
+	// 3. Sistema de Recompensas
+	deployRewardsSystem(contractManager, chain)
+
+	utils.LogInfo("Sistema de contratos base desplegado")
+}
+
+func deployGovernanceContract(cm *ContractManager, chain *blockchain.Blockchain) {
+	// Código del contrato de gobernanza
+	governanceCode := []*ContractOperation{
+		{
+			OpCode: "METHOD",
+			Args:   []interface{}{"propose", "Crear nueva propuesta", true},
+		},
+		{
+			OpCode: OpRequire,
+			Args:   []interface{}{"caller == creator", OpCompare, OpCaller, "$creator"},
+		},
+		{
+			OpCode: OpStore,
+			Args:   []interface{}{"proposals.$id", OpArgs(0)},
+		},
+		{
+			OpCode: OpEmitEvent,
+			Args:   []interface{}{"ProposalCreated", map[string]interface{}{"id": OpArgs(0)}},
+		},
+	}
+
+	// Estado inicial del contrato
+	initialState := ContractState{
+		"voting_delay":      "172800", // 2 días en bloques
+		"voting_period":     "259200", // 3 días en bloques
+		"proposal_count":    "0",
+		"quorum_percentage": "4", // 4% del total de TCC
+	}
+
+	// Desplegar contrato
+	contract, err := cm.CreateContract(
+		"GENESIS_ACCOUNT",
+		governanceCode,
+		initialState,
+		currency.NewBalance(0),
+	)
+
+	if err != nil {
+		utils.LogError("Error desplegando contrato de gobernanza: %v", err)
+	}
+
+	chain.RegisterSystemContract("governance", contract.Address)
+	utils.LogInfo("Contrato de Gobernanza desplegado: %s", contract.Address)
+}
+
+func deployValidatorRegistry(cm *ContractManager, chain *blockchain.Blockchain) {
+	// Código del registro de validadores
+	validatorCode := []*ContractOperation{
+		{
+			OpCode: "METHOD",
+			Args:   []interface{}{"register", "Registrar nuevo validador", true},
+		},
+		{
+			OpCode: OpRequire,
+			Args:   []interface{}{"balance >= 100 TCC", OpCompare, OpBalanceOf(OpCaller), "100000000000000000000"},
+		},
+		{
+			OpCode: OpStore,
+			Args: []interface{}{"validators.$caller", map[string]interface{}{
+				"stake":      OpArgs(0),
+				"status":     "active",
+				"registered": OpTimestamp,
+			}},
+		},
+		{
+			OpCode: OpEmitEvent,
+			Args:   []interface{}{"ValidatorRegistered", map[string]interface{}{"address": OpCaller}},
+		},
+	}
+
+	contract, err := cm.CreateContract(
+		"GENESIS_ACCOUNT",
+		validatorCode,
+		ContractState{"min_stake": "100000000000000000000"}, // 100 TCC en wei
+		currency.NewBalance(0),
+	)
+
+	if err != nil {
+		utils.LogError("Error desplegando registro de validadores: %v", err)
+	}
+
+	chain.RegisterSystemContract("validators", contract.Address)
+	utils.LogInfo("Registro de Validadores desplegado: %s", contract.Address)
+}
+
+func deployRewardsSystem(cm *ContractManager, chain *blockchain.Blockchain) {
+	// Código del sistema de recompensas
+	rewardsCode := []*ContractOperation{
+		{
+			OpCode: "METHOD",
+			Args:   []interface{}{"distribute", "Distribuir recompensas", true},
+		},
+		{
+			OpCode: OpNativeCall,
+			Args:   []interface{}{"get_block_producer"},
+		},
+		{
+			OpCode: OpTransfer,
+			Args:   []interface{}{OpResult, "2000000000000000000"}, // 2 TCC
+		},
+		{
+			OpCode: OpEmitEvent,
+			Args: []interface{}{"RewardsDistributed", map[string]interface{}{
+				"block":     OpBlockNumber,
+				"validator": OpResult,
+				"amount":    "2000000000000000000",
+			}},
+		},
+	}
+
+	contract, err := cm.CreateContract(
+		"GENESIS_ACCOUNT",
+		rewardsCode,
+		ContractState{"reward_per_block": "2000000000000000000"},
+		currency.NewBalanceFromBigInt(func() *big.Int { val, _ := big.NewInt(0).SetString("100000000000000000000", 10); return val }()), // 100 TCC iniciales
+	)
+
+	if err != nil {
+		utils.LogError("Error desplegando sistema de recompensas: %v", err)
+	}
+
+	chain.RegisterSystemContract("rewards", contract.Address)
+	utils.LogInfo("Sistema de Recompensas desplegado: %s", contract.Address)
+}
 
 // NewContractManager creates a new contract manager
 func NewContractManager(currencyMgr *currency.CurrencyManager) *ContractManager {

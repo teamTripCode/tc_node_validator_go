@@ -25,6 +25,7 @@ type Block struct {
 	Signature         string             `json:"signature"`                   // Signature of the validator who forged this block
 	Validator         string             `json:"validator"`                   // Public key or ID of the validator who forged the block
 	TotalFees         float64            `json:"totalFees,omitempty"`         // Total fees collected by the validator
+	Data              string
 }
 
 /**
