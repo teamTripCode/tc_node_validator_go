@@ -39,18 +39,18 @@ func main() {
 	node := p2p.NewNode(*portFlag)
 	utils.PrintStartupMessage(node.ID, *portFlag)
 
-	consensus, err := consensus.NewConsensus(DPOS, node.ID)
-	if err != nil {
-		log.Fatal("Error inicializando consenso:", err)
-	}
-	utils.LogInfo("Consenso %s inicializado", consensus.GetType())
-
 	// Initialize blockchain for transactions
 	txChain := blockchain.NewBlockchain(blockchain.TransactionBlock)
 	utils.LogInfo("Transaction blockchain initialized with %d blocks", txChain.GetLength())
 
-	currency.InitNativeToken(txChain, "TC", 1000000) // 1 millón de unidades iniciales
+	currencyManager := currency.InitNativeToken(txChain, "TC", 1000000) // 1 millón de unidades iniciales
 	utils.LogInfo("Native currency TripCoin initialized")
+
+	consensus, err := consensus.NewConsensus(DPOS, node.ID, currencyManager)
+	if err != nil {
+		log.Fatal("Error inicializando consenso:", err)
+	}
+	utils.LogInfo("Consenso %s inicializado", consensus.GetType())
 
 	// Desplegar contratos base del sistema
 	contracts.DeploySystemContracts(txChain)

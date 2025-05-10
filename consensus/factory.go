@@ -1,14 +1,17 @@
 package consensus
 
-import "fmt"
+import (
+	"fmt"
+	"tripcodechain_go/currency"
+)
 
 // NewConsensus crea una nueva instancia de consenso del tipo especificado
-func NewConsensus(consensusType ConsensusType, nodeID string) (Consensus, error) {
+func NewConsensus(consensusType ConsensusType, nodeID string, currencyManager *currency.CurrencyManager) (Consensus, error) {
 	var c Consensus
 
 	switch consensusType {
 	case "DPOS":
-		c = NewDPoS()
+		c = NewDPoS(currencyManager)
 	case "PBFT":
 		c = NewPBFT()
 	default:
