@@ -23,6 +23,7 @@ type Blockchain struct {
 	blockType  BlockType    // Type of blocks this blockchain accepts
 	difficulty int          // Mining difficulty (number of leading zeros required)
 	mutex      sync.RWMutex // Mutex to ensure thread-safe access to the blockchain
+	consensus  interface{}  // Interface to the consensus mechanism
 }
 
 // Códigos de operación para el lenguaje del contrato
@@ -80,6 +81,39 @@ type Contract struct {
 }
 
 /**
+ * SetConsensus sets the consensus mechanism for this blockchain.
+ *
+ * Parameters:
+ *   - consensus: The consensus implementation to use
+ */
+func (bc *Blockchain) SetConsensus(consensus interface{}) {
+	bc.mutex.Lock()
+	defer bc.mutex.Unlock()
+
+	bc.consensus = consensus
+	utils.LogInfo("Consenso establecido para la cadena de bloques tipo: %s", bc.blockType)
+
+	// Registrar evento de seguridad
+	utils.LogSecurityEvent("consensus_set", map[string]interface{}{
+		"blockchain_type": bc.blockType,
+		"consensus_type":  fmt.Sprintf("%T", consensus),
+		"blocks_count":    len(bc.blocks),
+	})
+}
+
+/**
+ * GetConsensus returns the consensus mechanism for this blockchain.
+ *
+ * Returns:
+ *   - interface{}: The consensus implementation being used
+ */
+func (bc *Blockchain) GetConsensus() interface{} {
+	bc.mutex.RLock()
+	defer bc.mutex.RUnlock()
+	return bc.consensus
+}
+
+/**
  * NewSystemContract creates a new system contract.
  *
  * Parameters:
@@ -111,7 +145,63 @@ func NewContractManager(currencyManager *currency.CurrencyManager) *ContractMana
 	}
 }
 
-// CreateContract crea un nuevo contrato en la blockchain
+func InitNativeToken(chain *Blockchain, symbol string, initialSupply int) *currency.CurrencyManager {
+	// Create a new CurrencyManager using the exported constructor
+	// This will create default accounts and settings
+	cm := currency.NewCurrencyManager()
+
+	// Convert the initial supply to base units
+	supplyInQuark := new(big.Int).Mul(
+		big.NewInt(int64(initialSupply)),
+		big.NewInt(currency.TripCoin), // TripCoin = 1e18
+	)
+
+	// We can't directly set totalSupply, so we'll need to work with existing methods
+
+	// First, let's burn the tokens from the genesis account to reset the supply
+	// Get current total supply
+	currentSupply := cm.GetTotalSupply()
+
+	// Burn all existing tokens from genesis account
+	if err := cm.BurnTokens(currency.GenesisAddress, currentSupply); err != nil {
+		utils.LogError("Error burning tokens: %v", err)
+		return nil
+	}
+
+	// Now mint the new amount to genesis
+	if err := cm.MintTokens(currency.GenesisAddress, currency.NewBalanceFromBigInt(supplyInQuark)); err != nil {
+		utils.LogError("Error minting tokens: %v", err)
+		return nil
+	}
+
+	// Calculate reserved amount (5%)
+	reservedPercentage := 0.05
+	reservedAmount := new(big.Int).Div(
+		new(big.Int).Mul(supplyInQuark, big.NewInt(int64(reservedPercentage*100))),
+		big.NewInt(100),
+	)
+
+	// Create a special account for reserved funds if needed
+	reservedAccount := "RESERVED_FUNDS_ACCOUNT"
+	cm.CreateAccount(reservedAccount)
+
+	// Transfer reserved amount from genesis to reserved account
+	if err := cm.TransferFunds(
+		currency.GenesisAddress,
+		reservedAccount,
+		currency.NewBalanceFromBigInt(reservedAmount),
+	); err != nil {
+		utils.LogError("Error transferring reserved funds: %v", err)
+	}
+
+	utils.LogInfo("Native token %s initialized:", symbol)
+	utils.LogInfo("- Total supply: %s", cm.GetTotalSupply().TripCoinString())
+	utils.LogInfo("- Genesis account balance: %s", cm.GetBalance(currency.GenesisAddress).TripCoinString())
+	utils.LogInfo("- Reserved funds: %s", cm.GetBalance(reservedAccount).TripCoinString())
+
+	return cm
+}
+
 // CreateContract crea un nuevo contrato en la blockchain
 func (cm *ContractManager) CreateContract(creator string, code []*ContractOperation, initialState ContractState, initialBalance *currency.Balance) (*Contract, error) {
 	// Verificar que el creador tiene suficientes fondos

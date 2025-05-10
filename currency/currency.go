@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"tripcodechain_go/blockchain"
 	"tripcodechain_go/utils"
 )
 
@@ -73,46 +72,6 @@ type GasParameters struct {
 	NetworkGasPrice   *Balance  // Current network gas price
 	BaseFeeMultiplier float64   // Multiplier for base fee calculation
 	LastUpdated       time.Time // Last time gas price was updated
-}
-
-func InitNativeToken(chain *blockchain.Blockchain, symbol string, initialSupply int) *CurrencyManager {
-	// Convertir suministro inicial a unidades base (Quark)
-	supplyInQuark := new(big.Int).Mul(
-		big.NewInt(int64(initialSupply)),
-		big.NewInt(TripCoin), // TripCoin = 1e18
-	)
-
-	// Crear el CurrencyManager con parámetros personalizados
-	cm := &CurrencyManager{
-		symbol:           symbol,
-		accounts:         make(map[string]*Account),
-		totalSupply:      &Balance{supplyInQuark},
-		genesisAllocated: false,
-		// ... (inicializar otros campos como en NewCurrencyManager)
-	}
-
-	// Distribución inicial (95% a cuenta génesis, 5% reservado)
-	reservedPercentage := 0.05
-	reservedAmount := new(big.Int).Div(
-		new(big.Int).Mul(supplyInQuark, big.NewInt(int64(reservedPercentage*100))),
-		big.NewInt(100),
-	)
-
-	// Asignar fondos a la cuenta génesis
-	genesisBalance := new(big.Int).Sub(supplyInQuark, reservedAmount)
-	cm.accounts[GenesisAddress] = &Account{
-		Address:      GenesisAddress,
-		Balance:      &Balance{genesisBalance},
-		Nonce:        0,
-		CreatedAt:    time.Now().UTC().Format(time.RFC3339),
-		LastActivity: time.Now().UTC().Format(time.RFC3339),
-	}
-
-	utils.LogInfo("Native token %s initialized:", symbol)
-	utils.LogInfo("- Total supply: %s", cm.totalSupply.TripCoinString())
-	utils.LogInfo("- Genesis account balance: %s", cm.accounts[GenesisAddress].Balance.TripCoinString())
-
-	return cm
 }
 
 // NewBalance creates a new Balance with the given int64 value

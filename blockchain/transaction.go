@@ -7,6 +7,19 @@ type BlockDataTransaction struct {
 	Recipient string  `json:"recipient"`
 }
 
+// NestedObject defines the structure for nested objects that can represent complex data structures
+type NestedObject map[string]interface{}
+
+// CriticalProcess represents a critical process included in a block
+type CriticalProcess struct {
+	ProcessID             string       `json:"processId"`
+	HashData              string       `json:"hashData"`
+	OriginalDataStructure NestedObject `json:"originalDataStructure"`
+	Description           string       `json:"description"`
+	Timestamp             string       `json:"timestamp"`
+	Signature             string       `json:"signature"`
+}
+
 // Transaction represents a transaction included in a block
 type Transaction struct {
 	ProcessID   string               `json:"processId"`
@@ -25,19 +38,6 @@ func (t *Transaction) GetID() string {
 // GetTimestamp returns the timestamp of a transaction
 func (t *Transaction) GetTimestamp() string {
 	return t.Timestamp
-}
-
-// NestedObject defines the structure for nested objects that can represent complex data structures
-type NestedObject map[string]interface{}
-
-// CriticalProcess represents a critical process included in a block
-type CriticalProcess struct {
-	ProcessID             string       `json:"processId"`
-	HashData              string       `json:"hashData"`
-	OriginalDataStructure NestedObject `json:"originalDataStructure"`
-	Description           string       `json:"description"`
-	Timestamp             string       `json:"timestamp"`
-	Signature             string       `json:"signature"`
 }
 
 // GetID returns the process ID of a critical process

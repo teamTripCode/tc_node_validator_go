@@ -2,9 +2,11 @@
 package utils
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"math/rand"
+	"time"
 )
 
 // Global verbose flag
@@ -25,6 +27,23 @@ func LogDebug(format string, args ...interface{}) {
 // LogError logs an error message
 func LogError(format string, args ...interface{}) {
 	log.Printf("[ERROR] "+format, args...)
+}
+
+// LogSecurityEvent logs a security-related event with structured data
+func LogSecurityEvent(eventType string, data map[string]interface{}) {
+	// Add timestamp to the data
+	data["timestamp"] = time.Now().Format(time.RFC3339)
+	data["event_type"] = eventType
+
+	// Convert to JSON
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		LogError("Failed to marshal security event data: %v", err)
+		return
+	}
+
+	// Log the security event
+	log.Printf("[SECURITY] Event: %s - Data: %s", eventType, string(jsonData))
 }
 
 // SetVerbose sets the verbose logging mode

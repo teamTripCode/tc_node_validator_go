@@ -32,36 +32,37 @@ type DelegateInfo struct {
 
 // DPoS implements the Delegated Proof of Stake consensus algorithm
 type DPoS struct {
-	NodeID          string                   // ID of the current node
-	Delegates       map[string]*DelegateInfo // Map of delegate IDs to their info
-	ActiveDelegates []string                 // List of active delegates for current round
-	CurrentProducer string                   // Current block producer
-	RoundLength     int                      // Number of blocks in a round
-	BlockTime       int                      // Time between blocks in seconds
-	CurrentRound    int                      // Current round number
-	CurrentSlot     int                      // Current slot in the round
-	LastBlockTime   time.Time                // Time of last block
-	StakeByNodeID   map[string]float64       // Map of node IDs to their stake
-	VotesByNodeID   map[string]string        // Map of voter IDs to delegate IDs they voted for
-	RewardPool      float64                  // Total available rewards in the pool
-	mutex           sync.RWMutex             // Mutex for thread safety
-	initialized     bool                     // Whether the DPoS has been initialized
-	currencyManager *currency.CurrencyManager
-	validators      map[string]*big.Int // Validadores y su stake
+	NodeID           string                   // ID of the current node
+	Delegates        map[string]*DelegateInfo // Map of delegate IDs to their info
+	ActiveDelegates  []string                 // List of active delegates for current round
+	CurrentProducer  string                   // Current block producer
+	RoundLength      int                      // Number of blocks in a round
+	BlockTime        int                      // Time between blocks in seconds
+	CurrentRound     int                      // Current round number
+	CurrentSlot      int                      // Current slot in the round
+	LastBlockTime    time.Time                // Time of last block
+	StakeByNodeID    map[string]float64       // Map of node IDs to their stake
+	VotesByNodeID    map[string]string        // Map of voter IDs to delegate IDs they voted for
+	RewardPool       float64                  // Total available rewards in the pool
+	mutex            sync.RWMutex             // Mutex for thread safety
+	initialized      bool                     // Whether the DPoS has been initialized
+	currencyManager  *currency.CurrencyManager
+	validators       map[string]*big.Int  // Validadores y su stake
+	bannedValidators map[string]time.Time // Map of banned validators and their ban expiration time
 }
 
 // NewDPoS creates a new DPoS consensus instance
 func NewDPoS(currency *currency.CurrencyManager) *DPoS {
 	return &DPoS{
-		Delegates:       make(map[string]*DelegateInfo),
-		ActiveDelegates: make([]string, 0),
-		RoundLength:     21,                       // 21 delegates per round - estándar de DPoS
-		BlockTime:       3,                        // 3 seconds between blocks
-		StakeByNodeID:   make(map[string]float64), // Initialize stake map
-		VotesByNodeID:   make(map[string]string),  // Initialize votes map
-		RewardPool:      1000.0,                   // Initial reward pool
-		currencyManager: currency,
-		validators:      make(map[string]*big.Int),
+		Delegates:        make(map[string]*DelegateInfo),
+		ActiveDelegates:  make([]string, 0),
+		RoundLength:      21,                       // 21 delegates per round - estándar de DPoS
+		BlockTime:        3,                        // 3 seconds between blocks
+		StakeByNodeID:    make(map[string]float64), // Initialize stake map
+		VotesByNodeID:    make(map[string]string),  // Initialize votes map
+		RewardPool:       1000.0,                   // Initial reward pool
+		validators:       make(map[string]*big.Int),
+		bannedValidators: make(map[string]time.Time),
 	}
 }
 
@@ -90,10 +91,96 @@ func (d *DPoS) selectBlockProducer() string {
 	return selected
 }
 
-func (d *DPoS) SlashValidator(address string, amount *currency.Balance) {
-	// Quemar parte del stake por mal comportamiento
-	d.currencyManager.BurnTokens(address, amount)
-	delete(d.validators, address)
+func (d *DPoS) SlashValidator(address string, severity string) error {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+
+	// 1. Verificar que el validador existe
+	delegate, exists := d.Delegates[address]
+	if !exists {
+		return fmt.Errorf("validator %s not found", address)
+	}
+
+	// 2. Determinar porcentaje de penalización según severidad
+	penaltyPercentage := 0.1 // 10% por defecto
+	switch severity {
+	case "minor":
+		penaltyPercentage = 0.1
+		delegate.Reliability *= 0.95 // Reducir 5% de confiabilidad
+	case "severe":
+		penaltyPercentage = 0.3
+		delegate.Reliability *= 0.80 // Reducir 20% de confiabilidad
+	case "critical":
+		penaltyPercentage = 0.5
+		delegate.Reliability = 0 // Confiabilidad a cero
+	}
+
+	// 3. Calcular cantidad a quemar
+	stake := d.currencyManager.GetStake(address)
+	penaltyAmount := new(big.Float).Mul(
+		new(big.Float).SetInt(stake.Int),
+		big.NewFloat(penaltyPercentage),
+	)
+
+	penaltyInt, _ := penaltyAmount.Int(nil)
+	penalty := currency.NewBalanceFromBigInt(penaltyInt)
+
+	// 4. Aplicar penalización
+	if err := d.currencyManager.BurnTokens(address, penalty); err != nil {
+		return err
+	}
+
+	// 5. Actualizar stake y reputación
+	penaltyFloat, _ := penaltyAmount.Float64()
+	delegate.Stake -= penaltyFloat
+	delegate.MissedBlocks += 1
+
+	// 6. Registrar evento de seguridad
+	utils.LogSecurityEvent("validator_slashed", map[string]interface{}{
+		"validator":       address,
+		"severity":        severity,
+		"penalty_amount":  penalty.TripCoinString(),
+		"new_reliability": delegate.Reliability,
+		"remaining_stake": delegate.Stake,
+	})
+
+	// 7. Ban temporal por baja confiabilidad
+	if delegate.Reliability < 50 {
+		banDuration := time.Hour * 24
+		utils.LogSecurityEvent("validator_banned", map[string]interface{}{
+			"validator": address,
+			"duration":  banDuration.String(),
+			"reason":    "low reliability after slashing",
+		})
+
+		// Agregar a lista de baneados
+		d.bannedValidators[address] = time.Now().Add(banDuration)
+
+		// Eliminar de validadores activos
+		delete(d.validators, address)
+		for i, id := range d.ActiveDelegates {
+			if id == address {
+				d.ActiveDelegates = append(d.ActiveDelegates[:i], d.ActiveDelegates[i+1:]...)
+				break
+			}
+		}
+
+		// Programar rehabilitación automática
+		time.AfterFunc(banDuration, func() {
+			d.mutex.Lock()
+			defer d.mutex.Unlock()
+			delete(d.bannedValidators, address)
+			d.validators[address] = stake.Sub(penalty).Int
+			utils.LogSecurityEvent("validator_reinstated", map[string]interface{}{
+				"validator": address,
+			})
+		})
+	}
+
+	// 8. Actualizar listas de delegados
+	d.UpdateActiveDelegates()
+
+	return nil
 }
 
 // Initialize sets up the DPoS consensus algorithm
