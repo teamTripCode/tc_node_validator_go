@@ -305,7 +305,7 @@ func generateContractAddress(creator string, _ []*ContractOperation, timestamp i
 }
 
 // OpBalanceOf crea una operación para consultar el balance de una dirección
-func OpBalanceOf(address interface{}) string {
+func OpBalanceOf(address any) string {
 	return fmt.Sprintf("BALANCE_OF(%v)", address)
 }
 

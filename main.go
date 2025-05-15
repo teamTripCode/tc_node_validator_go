@@ -10,108 +10,103 @@ import (
 
 	"tripcodechain_go/blockchain"
 	"tripcodechain_go/consensus"
-	"tripcodechain_go/contracts"
 	"tripcodechain_go/mempool"
 	"tripcodechain_go/p2p"
 	"tripcodechain_go/utils"
 )
 
 func main() {
-	// Configurar logging
+	// Set up logging
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
 	log.SetOutput(os.Stdout)
 
-	// Parsear flags
-	portFlag := flag.Int("port", 3000, "Puerto para escuchar")
-	verboseFlag := flag.Bool("verbose", true, "Habilitar logging detallado")
+	// Parse command line flags
+	portFlag := flag.Int("port", 3000, "Port to listen on")
+	verboseFlag := flag.Bool("verbose", true, "Enable detailed logging")
+	dataDirFlag := flag.String("datadir", "data", "Directory for blockchain data")
 	flag.Parse()
 
-	// Configurar modo verbose
+	// Set verbose mode
 	utils.SetVerbose(*verboseFlag)
 
-	// Crear nuevo nodo
+	// Create new node
 	node := p2p.NewNode(*portFlag)
 	utils.PrintStartupMessage(node.ID, *portFlag)
 
-	// Inicializar cadena de bloques (Transactions)
-	txChain, _, _, err := blockchain.InitializeBlockchain("TransactionChain", blockchain.TransactionBlock)
-	if err != nil {
-		log.Fatal("Error inicializando la cadena de bloques de transacciones:", err)
-	}
-	TxBlockType := txChain.GetBlockType()
-	TxChain, err := blockchain.NewBlockchain(TxBlockType, "TransactionChain")
-	if err != nil {
-		log.Fatal("Error inicializando la cadena de transacciones:", err)
-	}
-	utils.LogInfo("Cadenas inicializadas - Transacciones: %d bloques",
-		txChain.GetLength(), TxChain.GetLength())
+	// Create data directories
+	txDataDir := *dataDirFlag + "/tx_chain"
+	criticalDataDir := *dataDirFlag + "/critical_chain"
 
-	// Inicializar cadena de bloques (Procesos Criticos)
-	txCriticalChain, _, _, err := blockchain.InitializeBlockchain("ProccessChain", blockchain.CriticalProcessBlock)
-	if err != nil {
-		log.Fatal("Error inicializando la cadena de bloques de procesos:", err)
+	if err := os.MkdirAll(txDataDir, 0755); err != nil {
+		log.Fatal("Error creating transaction chain directory:", err)
 	}
-	TxBlockType = txCriticalChain.GetBlockType()
-	TxChain, err = blockchain.NewBlockchain(TxBlockType, "ProccessChain")
-	if err != nil {
-		log.Fatal("Error inicializando la cadena de bloques críticos:", err)
+	if err := os.MkdirAll(criticalDataDir, 0755); err != nil {
+		log.Fatal("Error creating critical chain directory:", err)
 	}
-	utils.LogInfo("Cadenas inicializadas - Transacciones Críticas: %d bloques",
-		txChain.GetLength(), TxChain.GetLength())
 
-	// Inicializar sistema económico
-	currencyManager := blockchain.InitNativeToken(txChain, "TC", 1000000)
-	utils.LogInfo("Sistema de moneda nativa inicializado")
+	// Initialize blockchain systems - only once per chain type
+	txChain, contractManager, currencyManager, err := blockchain.InitializeBlockchain(txDataDir, blockchain.TransactionBlock)
+	if err != nil {
+		log.Fatal("Error initializing transaction blockchain:", err)
+	}
+	utils.LogInfo("Transaction chain initialized with %d blocks", txChain.GetLength())
 
-	// Configurar consensos duales
+	// Initialize critical process blockchain
+	criticalChain, _, _, err := blockchain.InitializeBlockchain(criticalDataDir, blockchain.CriticalProcessBlock)
+	if err != nil {
+		log.Fatal("Error initializing critical process blockchain:", err)
+	}
+	utils.LogInfo("Critical process chain initialized with %d blocks", criticalChain.GetLength())
+
+	// Configure dual consensus systems
 	consensusTx, err := consensus.NewConsensus("DPOS", node.ID, currencyManager)
 	if err != nil {
-		log.Fatal("Error inicializando consenso DPoS:", err)
+		log.Fatal("Error initializing DPoS consensus:", err)
 	}
 
 	consensusCritical, err := consensus.NewConsensus("PBFT", node.ID, currencyManager)
 	if err != nil {
-		log.Fatal("Error inicializando consenso PBFT:", err)
+		log.Fatal("Error initializing PBFT consensus:", err)
 	}
 
-	// Asignar consensos a las cadenas correspondientes
+	// Assign consensus mechanisms to corresponding chains
 	txChain.SetConsensus(consensusTx)
-	txCriticalChain.SetConsensus(consensusCritical)
-	utils.LogInfo("Sistema de consenso dual configurado - DPoS para transacciones, PBFT para procesos críticos")
+	criticalChain.SetConsensus(consensusCritical)
+	utils.LogInfo("Dual consensus system configured - DPoS for transactions, PBFT for critical processes")
 
-	// Desplegar contratos del sistema
-	contracts.DeploySystemContracts(txChain)
-	utils.LogInfo("Contratos inteligentes base desplegados")
+	// Deploy system contracts
+	blockchain.DeploySystemContracts(txChain, contractManager)
+	utils.LogInfo("Base smart contracts deployed")
 
-	// Inicializar mempools
+	// Initialize mempools
 	txMempool := mempool.NewMempool()
 	criticalMempool := mempool.NewMempool()
-	utils.LogInfo("Mempools inicializados - Transacciones: %d, Procesos: %d",
+	utils.LogInfo("Mempools initialized - Transactions: %d, Processes: %d",
 		txMempool.GetSize(), criticalMempool.GetSize())
 
-	// Configurar e iniciar servidor
-	server := p2p.NewServer(node, txChain, txCriticalChain, txMempool, criticalMempool)
+	// Configure and start server
+	server := p2p.NewServer(node, txChain, criticalChain, txMempool, criticalMempool)
 
-	// Iniciar procesos en segundo plano
+	// Start background processes
 	server.StartBackgroundProcessing()
-	utils.LogInfo("Procesamiento en segundo plano iniciado")
+	utils.LogInfo("Background processing started")
 
-	// Iniciar monitoreo de nodo
+	// Start node monitoring
 	go node.StartHeartbeat()
-	utils.LogInfo("Heartbeat del nodo iniciado")
+	utils.LogInfo("Node heartbeat started")
 
-	// Descubrir otros nodos
+	// Discover other nodes
 	go func() {
 		time.Sleep(2 * time.Second)
 		node.DiscoverNodes()
-		utils.LogInfo("Iniciado descubrimiento de nodos...")
+		utils.LogInfo("Node discovery initiated...")
 	}()
 
-	// Manejar apagado seguro
+	// Handle graceful shutdown
 	setupGracefulShutdown()
 
-	// Iniciar servidor (bloqueante)
-	utils.LogInfo("Iniciando servidor en el puerto %d...", *portFlag)
+	// Start server (blocking)
+	utils.LogInfo("Starting server on port %d...", *portFlag)
 	server.Start()
 }
 
@@ -121,8 +116,8 @@ func setupGracefulShutdown() {
 
 	go func() {
 		<-c
-		utils.LogInfo("Apagando nodo...")
-		// Aquí deberías añadir limpieza de recursos
+		utils.LogInfo("Shutting down node...")
+		// Add resource cleanup here
 		os.Exit(0)
 	}()
 }

@@ -8,7 +8,7 @@ type BlockDataTransaction struct {
 }
 
 // NestedObject defines the structure for nested objects that can represent complex data structures
-type NestedObject map[string]interface{}
+type NestedObject map[string]any
 
 // CriticalProcess represents a critical process included in a block
 type CriticalProcess struct {
