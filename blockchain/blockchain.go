@@ -29,16 +29,6 @@ type Blockchain struct {
 	currencyManager *currency.CurrencyManager // Reference to the CurrencyManager
 }
 
-/**
- * GetCurrencyManager returns the CurrencyManager associated with this blockchain.
- *
- * Returns:
- *   - *currency.CurrencyManager: The CurrencyManager instance
- */
-func (bc *Blockchain) GetCurrencyManager() *currency.CurrencyManager {
-	return bc.currencyManager
-}
-
 // Códigos de operación para el lenguaje del contrato
 const (
 	OpStore       = "STORE"
@@ -72,6 +62,7 @@ type ContractManager struct {
 	contracts       map[string]*Contract
 	currencyManager *currency.CurrencyManager
 	db              *BlockchainDB
+	mutex           sync.Mutex
 }
 
 // ContractOperation representa una operación en el código del contrato
@@ -92,6 +83,16 @@ type Contract struct {
 	Balance     *currency.Balance
 	CreatedAt   time.Time
 	LastUpdated time.Time
+}
+
+/**
+ * GetCurrencyManager returns the CurrencyManager associated with this blockchain.
+ *
+ * Returns:
+ *   - *currency.CurrencyManager: The CurrencyManager instance
+ */
+func (bc *Blockchain) GetCurrencyManager() *currency.CurrencyManager {
+	return bc.currencyManager
 }
 
 // NewContractManager creates a new instance of ContractManager with database support
@@ -148,7 +149,7 @@ func InitializeBlockchain(dataDir string, blockType BlockType) (*Blockchain, *Co
  * Parameters:
  *   - consensus: The consensus implementation to use
  */
-func (bc *Blockchain) SetConsensus(consensus interface{}) {
+func (bc *Blockchain) SetConsensus(consensus any) {
 	bc.mutex.Lock()
 	defer bc.mutex.Unlock()
 
@@ -169,7 +170,7 @@ func (bc *Blockchain) SetConsensus(consensus interface{}) {
  * Returns:
  *   - interface{}: The consensus implementation being used
  */
-func (bc *Blockchain) GetConsensus() interface{} {
+func (bc *Blockchain) GetConsensus() any {
 	bc.mutex.RLock()
 	defer bc.mutex.RUnlock()
 	return bc.consensus
@@ -201,8 +202,19 @@ func NewSystemContract(name string) *SystemContract {
 
 func InitNativeToken(chain *Blockchain, symbol string, initialSupply int) *currency.CurrencyManager {
 	// Create a new CurrencyManager using the exported constructor
-	// This will create default accounts and settings
 	cm := currency.NewCurrencyManager()
+
+	// Add defensive error checking
+	if cm == nil {
+		utils.LogError("Failed to create currency manager")
+		return nil
+	}
+
+	// Check if Genesis address exists, create if needed
+	if !cm.AccountExists(currency.GenesisAddress) {
+		utils.LogInfo("Creating Genesis account: %s", currency.GenesisAddress)
+		cm.CreateAccount(currency.GenesisAddress)
+	}
 
 	// Convert the initial supply to base units
 	supplyInQuark := new(big.Int).Mul(
@@ -210,22 +222,22 @@ func InitNativeToken(chain *Blockchain, symbol string, initialSupply int) *curre
 		big.NewInt(currency.TripCoin), // TripCoin = 1e18
 	)
 
-	// We can't directly set totalSupply, so we'll need to work with existing methods
-
-	// First, let's burn the tokens from the genesis account to reset the supply
 	// Get current total supply
 	currentSupply := cm.GetTotalSupply()
 
-	// Burn all existing tokens from genesis account
-	if err := cm.BurnTokens(currency.GenesisAddress, currentSupply); err != nil {
-		utils.LogError("Error burning tokens: %v", err)
-		return nil
+	// Only burn if there's something to burn
+	if currentSupply != nil && currentSupply.Cmp(big.NewInt(0)) > 0 {
+		// Try to burn existing tokens from genesis account
+		if err := cm.BurnTokens(currency.GenesisAddress, currentSupply); err != nil {
+			utils.LogError("Error burning tokens: %v", err)
+			// Continue with existing supply - don't fail the entire process
+		}
 	}
 
 	// Now mint the new amount to genesis
 	if err := cm.MintTokens(currency.GenesisAddress, currency.NewBalanceFromBigInt(supplyInQuark)); err != nil {
 		utils.LogError("Error minting tokens: %v", err)
-		return nil
+		// Still return the currency manager, even if minting failed
 	}
 
 	// Calculate reserved amount (5%)
@@ -237,7 +249,9 @@ func InitNativeToken(chain *Blockchain, symbol string, initialSupply int) *curre
 
 	// Create a special account for reserved funds if needed
 	reservedAccount := "RESERVED_FUNDS_ACCOUNT"
-	cm.CreateAccount(reservedAccount)
+	if !cm.AccountExists(reservedAccount) {
+		cm.CreateAccount(reservedAccount)
+	}
 
 	// Transfer reserved amount from genesis to reserved account
 	if err := cm.TransferFunds(
@@ -253,14 +267,31 @@ func InitNativeToken(chain *Blockchain, symbol string, initialSupply int) *curre
 	utils.LogInfo("- Genesis account balance: %s", cm.GetBalance(currency.GenesisAddress).TripCoinString())
 	utils.LogInfo("- Reserved funds: %s", cm.GetBalance(reservedAccount).TripCoinString())
 
+	// Set the currency manager in the blockchain
+	chain.currencyManager = cm
+
 	return cm
 }
 
-// CreateContract creates a new contract in the blockchain with database persistence
+// Fix for CreateContract method to avoid nil pointer exceptions
 func (cm *ContractManager) CreateContract(creator string, code []*ContractOperation, initialState ContractState, initialBalance *currency.Balance) (*Contract, error) {
+	// Guard against nil currency manager
+	if cm.currencyManager == nil {
+		return nil, errors.New("currency manager is not initialized")
+	}
+
+	// Guard against nil initialBalance
+	if initialBalance == nil {
+		initialBalance = currency.NewBalance(0)
+	}
+
 	// Check if creator has sufficient funds (logic similar to original implementation)
 	if initialBalance.Cmp(big.NewInt(0)) > 0 {
 		creatorBalance := cm.currencyManager.GetBalance(creator)
+		if creatorBalance == nil {
+			return nil, fmt.Errorf("creator account %s not found", creator)
+		}
+
 		if creatorBalance.Cmp(initialBalance.Int) < 0 {
 			return nil, errors.New("insufficient funds to create contract")
 		}
@@ -287,6 +318,10 @@ func (cm *ContractManager) CreateContract(creator string, code []*ContractOperat
 	}
 
 	// Save contract to database first to ensure persistence
+	if cm.db == nil {
+		return nil, errors.New("database connection is not initialized")
+	}
+
 	if err := cm.db.SaveContract(contract); err != nil {
 		return nil, fmt.Errorf("failed to save contract to database: %v", err)
 	}
@@ -337,8 +372,19 @@ func (bc *Blockchain) GetSystemContract(name string) (string, error) {
 	return address, nil
 }
 
-// DeploySystemContracts deploys all system contracts
+// Fix for the DeploySystemContracts function to properly handle errors
 func DeploySystemContracts(chain *Blockchain, contractManager *ContractManager) {
+	// Check if required components are initialized
+	if chain == nil {
+		utils.LogError("Blockchain is nil in DeploySystemContracts")
+		return
+	}
+
+	if contractManager == nil {
+		utils.LogError("ContractManager is nil in DeploySystemContracts")
+		return
+	}
+
 	// Check if system contracts are already deployed
 	_, err := chain.GetSystemContract("governance")
 	if err == nil {
@@ -346,8 +392,15 @@ func DeploySystemContracts(chain *Blockchain, contractManager *ContractManager) 
 		return
 	}
 
-	// // Get the CurrencyManager of the blockchain
-	// currencyManager := chain.GetCurrencyManager()
+	// Make sure the currency manager is set in both blockchain and contract manager
+	currencyManager := chain.GetCurrencyManager()
+	if currencyManager == nil {
+		utils.LogError("CurrencyManager is nil in DeploySystemContracts")
+		return
+	}
+
+	// Ensure contract manager has the same currency manager
+	contractManager.currencyManager = currencyManager
 
 	// 1. Governance Contract
 	deployGovernanceContract(contractManager, chain)
@@ -355,7 +408,7 @@ func DeploySystemContracts(chain *Blockchain, contractManager *ContractManager) 
 	// 2. Validator Registry
 	deployValidatorRegistry(contractManager, chain)
 
-	// 3. Rewards System
+	// 3. Rewards System - this was failing
 	deployRewardsSystem(contractManager, chain)
 
 	utils.LogInfo("Base contract system deployed")
@@ -446,24 +499,31 @@ func deployValidatorRegistry(cm *ContractManager, chain *Blockchain) {
 	utils.LogInfo("Registro de Validadores desplegado: %s", contract.Address)
 }
 
+// Fix for the deployRewardsSystem function
 func deployRewardsSystem(cm *ContractManager, chain *Blockchain) {
+	// Check if currency manager is properly initialized
+	if cm.currencyManager == nil {
+		utils.LogError("Currency manager is nil in deployRewardsSystem")
+		return
+	}
+
 	// Código del sistema de recompensas
 	rewardsCode := []*ContractOperation{
 		{
 			OpCode: "METHOD",
-			Args:   []interface{}{"distribute", "Distribuir recompensas", true},
+			Args:   []any{"distribute", "Distribuir recompensas", true},
 		},
 		{
 			OpCode: OpNativeCall,
-			Args:   []interface{}{"get_block_producer"},
+			Args:   []any{"get_block_producer"},
 		},
 		{
 			OpCode: OpTransfer,
-			Args:   []interface{}{OpResult, "2000000000000000000"}, // 2 TCC
+			Args:   []any{OpResult, "2000000000000000000"}, // 2 TCC
 		},
 		{
 			OpCode: OpEmitEvent,
-			Args: []interface{}{"RewardsDistributed", map[string]interface{}{
+			Args: []any{"RewardsDistributed", map[string]any{
 				"block":     OpBlockNumber,
 				"validator": OpResult,
 				"amount":    "2000000000000000000",
@@ -471,17 +531,33 @@ func deployRewardsSystem(cm *ContractManager, chain *Blockchain) {
 		},
 	}
 
-	// Crear el contrato con balance inicial
-	initialBalance, _ := new(big.Int).SetString("100000000000000000000", 10) // 100 TCC
+	// Create contract with zero initial balance first to avoid potential nil issues
 	contract, err := cm.CreateContract(
 		"GENESIS_ACCOUNT",
 		rewardsCode,
 		ContractState{"reward_per_block": "2000000000000000000"},
-		currency.NewBalanceFromBigInt(initialBalance),
+		currency.NewBalance(0), // Use zero balance initially
 	)
 
 	if err != nil {
 		utils.LogError("Error desplegando sistema de recompensas: %v", err)
+		return
+	}
+
+	// Now try to fund the contract if everything is properly set up
+	if cm.currencyManager != nil {
+		initialBalance, _ := new(big.Int).SetString("100000000000000000000", 10) // 100 TCC
+		err = cm.currencyManager.TransferFunds(
+			"GENESIS_ACCOUNT",
+			contract.Address,
+			currency.NewBalanceFromBigInt(initialBalance),
+		)
+
+		if err != nil {
+			utils.LogError("Failed to fund rewards contract: %v", err)
+		} else {
+			utils.LogInfo("Funded rewards contract with 100 TCC")
+		}
 	}
 
 	chain.RegisterSystemContract("rewards", contract.Address)

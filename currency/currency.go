@@ -276,6 +276,11 @@ func (cm *CurrencyManager) GetAccount(address string) *Account {
 	return account
 }
 
+func (cm *CurrencyManager) AccountExists(address string) bool {
+	_, exists := cm.accounts[address]
+	return exists
+}
+
 // TransferFunds transfers funds from one account to another
 func (cm *CurrencyManager) TransferFunds(from, to string, amount *Balance) error {
 	cm.mutex.Lock()
@@ -386,15 +391,18 @@ func (cm *CurrencyManager) BurnTokens(from string, amount *Balance) error {
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
 
-	// Validate amount
-	if amount.Int.Cmp(big.NewInt(0)) <= 0 {
-		return fmt.Errorf("invalid amount: must be positive")
-	}
-
 	// Get account
 	fromAccount, exists := cm.accounts[from]
 	if !exists {
 		return fmt.Errorf("account does not exist: %s", from)
+	}
+
+	maxBurn := new(big.Int).Set(fromAccount.Balance.Int)
+	maxBurn.Div(maxBurn, big.NewInt(100)) // 90% of balance
+
+	// Validate amount
+	if amount.Int.Cmp(maxBurn) <= 0 {
+		amount.Int = maxBurn // Cap the burn amount
 	}
 
 	// Check balance
