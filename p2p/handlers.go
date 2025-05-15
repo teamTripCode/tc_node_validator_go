@@ -182,7 +182,7 @@ func (s *Server) AddTxBlockHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.TxChain.AddBlock(&block) {
+	if err := s.TxChain.AddBlock(&block); err == nil {
 		utils.LogInfo("Added new transaction block #%d from network", block.Index)
 		w.WriteHeader(http.StatusCreated)
 	} else {
@@ -200,7 +200,7 @@ func (s *Server) AddCriticalBlockHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if s.CriticalChain.AddBlock(&block) {
+	if err := s.CriticalChain.AddBlock(&block); err == nil {
 		utils.LogInfo("Added new critical process block #%d from network", block.Index)
 		w.WriteHeader(http.StatusCreated)
 	} else {

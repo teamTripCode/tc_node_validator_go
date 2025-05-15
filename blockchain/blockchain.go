@@ -7,83 +7,11 @@ import (
 	"fmt"
 	"math/big"
 	"os"
-	"sync"
 	"time"
 
 	"tripcodechain_go/currency"
 	"tripcodechain_go/utils"
 )
-
-/**
- * Blockchain represents the chain of blocks.
- * It includes metadata like block type and mining difficulty,
- * as well as concurrency protection using a mutex.
- */
-type Blockchain struct {
-	blocks          []*Block     // Ordered list of blocks in the chain
-	blockType       BlockType    // Type of blocks this blockchain accepts
-	difficulty      int          // Mining difficulty (number of leading zeros required)
-	mutex           sync.RWMutex // Mutex to ensure thread-safe access to the blockchain
-	consensus       any          // Interface to the consensus mechanism
-	db              *BlockchainDB
-	currencyManager *currency.CurrencyManager // Reference to the CurrencyManager
-}
-
-// Códigos de operación para el lenguaje del contrato
-const (
-	OpStore       = "STORE"
-	OpRequire     = "REQUIRE"
-	OpCompare     = "COMPARE"
-	OpCaller      = "CALLER"
-	OpArgs        = "ARGS"
-	OpEmitEvent   = "EMIT_EVENT"
-	OpTransfer    = "TRANSFER"
-	OpNativeCall  = "NATIVE_CALL"
-	OpResult      = "RESULT"
-	OpTimestamp   = "TIMESTAMP"
-	OpBlockNumber = "BLOCK_NUMBER"
-)
-
-/**
- * SystemContract represents a contract deployed on the blockchain.
- * These contracts handle system-level functionality like rewards,
- * validator management, and blockchain governance.
- */
-type SystemContract struct {
-	Name      string            // Name of the contract
-	Address   string            // Unique identifier for the contract
-	State     map[string]string // Contract's state variables
-	CreatedAt time.Time         // Time when contract was deployed
-}
-
-// Balance representa un saldo de moneda en la blockchain
-// ContractManager gestiona la creación y ejecución de contratos
-type ContractManager struct {
-	contracts       map[string]*Contract
-	currencyManager *currency.CurrencyManager
-	db              *BlockchainDB
-	mutex           sync.Mutex
-}
-
-// ContractOperation representa una operación en el código del contrato
-type ContractOperation struct {
-	OpCode string
-	Args   []any
-}
-
-// ContractState representa el estado de un contrato
-type ContractState map[string]string
-
-// Contract representa un contrato inteligente en la blockchain
-type Contract struct {
-	Address     string               `json:"address"`
-	Creator     string               `json:"creator"`
-	Code        []*ContractOperation `json:"code"`
-	State       ContractState        `json:"state"`
-	Balance     *currency.Balance    `json:"balance"`
-	CreatedAt   time.Time            `json:"created_at"`
-	LastUpdated time.Time            `json:"last_updated"`
-}
 
 /**
  * GetCurrencyManager returns the CurrencyManager associated with this blockchain.
@@ -641,27 +569,46 @@ func (bc *Blockchain) CreateBlock() *Block {
 //
 // Returns:
 //   - bool: True if the block was added successfully, false otherwise
-func (bc *Blockchain) AddBlock(block *Block) bool {
+func (bc *Blockchain) AddBlock(block *Block) error {
 	bc.mutex.Lock()
 	defer bc.mutex.Unlock()
 
-	// Validate the block before adding it
 	if !bc.isValidBlock(block) {
-		utils.LogError("Attempted to add invalid block %d", block.Index)
-		return false
+		return errors.New("invalid block")
 	}
 
-	// Save to database first to ensure persistence
 	if err := bc.db.SaveBlock(block); err != nil {
-		utils.LogError("Failed to save block %d to database: %v", block.Index, err)
-		return false
+		return fmt.Errorf("error saving block: %v", err)
 	}
 
-	// Add to in-memory cache
 	bc.blocks = append(bc.blocks, block)
 
-	utils.LogInfo("Block %d added to blockchain with hash %s", block.Index, block.Hash)
-	return true
+	// Actualizar dificultad dinámicamente
+	bc.adjustDifficulty()
+
+	return nil
+}
+
+func (bc *Blockchain) adjustDifficulty() {
+	const targetBlockTime = 15 // segundos
+	if len(bc.blocks) < 2 {
+		return
+	}
+
+	lastBlock := bc.blocks[len(bc.blocks)-1]
+	prevBlock := bc.blocks[len(bc.blocks)-2]
+
+	actualTime, _ := time.Parse(time.RFC3339, lastBlock.Timestamp)
+	prevTime, _ := time.Parse(time.RFC3339, prevBlock.Timestamp)
+	timeDiff := actualTime.Sub(prevTime).Seconds()
+
+	if timeDiff < targetBlockTime/2 {
+		bc.difficulty++
+	} else if timeDiff > targetBlockTime*2 {
+		bc.difficulty--
+	}
+
+	utils.LogInfo("New difficulty: %d", bc.difficulty)
 }
 
 /**
@@ -693,6 +640,85 @@ func (bc *Blockchain) isValidBlock(block *Block) bool {
 	}
 
 	return true
+}
+
+/**
+ * IsValidChain provides a public method to validate an entire chain of blocks.
+ * This extends the internal isValidChain functionality to be accessible by external packages.
+ *
+ * Parameters:
+ *   - chain: Slice of blocks to validate
+ *
+ * Returns:
+ *   - bool: True if the chain is valid, false otherwise
+ *   - error: Error message if validation fails, nil if successful
+ */
+func (bc *Blockchain) IsValidChain(chain []*Block) (bool, error) {
+	// Ensure chain is not empty
+	if len(chain) == 0 {
+		return false, errors.New("empty blockchain provided")
+	}
+
+	// Genesis block must match
+	if chain[0].Hash != bc.blocks[0].Hash {
+		return false, errors.New("genesis block mismatch")
+	}
+
+	// Validate each block against its predecessor
+	for i := 1; i < len(chain); i++ {
+		if !bc.isBlockConsistentWithPrevious(chain[i], chain[i-1]) {
+			return false, fmt.Errorf("block %d is inconsistent with previous block", chain[i].Index)
+		}
+
+		// Validate block's hash against its required difficulty
+		if !chain[i].HasValidHash(bc.difficulty) {
+			return false, fmt.Errorf("block %d hash does not meet difficulty requirement", chain[i].Index)
+		}
+	}
+
+	utils.LogInfo("External chain validation successful for %d blocks", len(chain))
+	return true, nil
+}
+
+/**
+ * HashValidHash validates if a given hash meets the required difficulty level.
+ * It checks if the hash has the specified number of leading zeros.
+ *
+ * Parameters:
+ *   - hash: The hash string to validate
+ *   - difficulty: The number of leading zeros required
+ *
+ * Returns:
+ *   - bool: True if the hash meets the difficulty requirement, false otherwise
+ */
+func HashValidHash(hash string, difficulty int) bool {
+	// Check if hash has enough leading zeros to satisfy difficulty
+	prefix := ""
+	for i := 0; i < difficulty; i++ {
+		prefix += "0"
+	}
+
+	return len(hash) >= difficulty && hash[0:difficulty] == prefix
+}
+
+/**
+ * HasValidHash checks if the block's hash meets the required difficulty level.
+ * This method is used to validate that the block was properly mined.
+ *
+ * Parameters:
+ *   - difficulty: The number of leading zeros required
+ *
+ * Returns:
+ *   - bool: True if the block's hash meets the difficulty requirement, false otherwise
+ */
+func (b *Block) HasValidHash(difficulty int) bool {
+	// First verify the hash is correct
+	if b.Hash != b.CalculateHash() {
+		return false
+	}
+
+	// Then check if it meets the difficulty requirement
+	return HashValidHash(b.Hash, difficulty)
 }
 
 /**

@@ -51,6 +51,12 @@ type DPoS struct {
 	bannedValidators map[string]time.Time // Map of banned validators and their ban expiration time
 }
 
+// ValidatorInfo represents information about a validator
+type ValidatorInfo struct {
+	Address string `json:"address"`
+	Stake   string `json:"stake"`
+}
+
 // NewDPoS creates a new DPoS consensus instance
 func NewDPoS(currency *currency.CurrencyManager) *DPoS {
 	return &DPoS{
@@ -754,4 +760,18 @@ func (d *DPoS) GetDelegateStats() map[string]interface{} {
 		"rewardPool":      d.RewardPool,
 		"lastBlockTime":   d.LastBlockTime.Format(time.RFC3339),
 	}
+}
+
+func (d *DPoS) UpdateValidators(validators []ValidatorInfo) {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+
+	d.validators = make(map[string]*big.Int)
+	for _, val := range validators {
+		stake, _ := new(big.Int).SetString(val.Stake, 10)
+		d.validators[val.Address] = stake
+	}
+
+	d.UpdateActiveDelegates()
+	utils.LogInfo("Validators updated: %d active validators", len(d.validators))
 }

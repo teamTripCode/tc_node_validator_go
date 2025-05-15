@@ -1,4 +1,3 @@
-// p2p/server.go
 package p2p
 
 import (

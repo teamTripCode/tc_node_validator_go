@@ -17,6 +17,7 @@ type Node struct {
 	ID         string
 	Port       int
 	KnownNodes []string
+	PrivateKey string
 	mutex      sync.Mutex
 }
 
@@ -73,37 +74,51 @@ func (n *Node) PingNode(node string) {
 
 // DiscoverNodes attempts to connect to known nodes
 func (n *Node) DiscoverNodes() {
-	for _, node := range n.GetKnownNodes() {
-		if node != n.ID {
-			utils.LogInfo("Attempting to connect to node %s", node)
-			resp, err := http.Get(fmt.Sprintf("http://%s/nodes", node))
-			if err != nil {
-				utils.LogError("Could not connect to node %s: %v", node, err)
-				continue
-			}
-			defer resp.Body.Close()
+	initialNodes := n.GetKnownNodes()
+	visited := make(map[string]bool)
 
-			var nodes []string
-			if err := json.NewDecoder(resp.Body).Decode(&nodes); err != nil {
-				utils.LogError("Error decoding nodes from %s: %v", node, err)
-				continue
-			}
+	for len(initialNodes) > 0 {
+		node := initialNodes[0]
+		initialNodes = initialNodes[1:]
 
-			// Register the new node
-			n.RegisterWithNode(node)
-
-			// Add new nodes to our known nodes
-			n.mutex.Lock()
-			for _, newNode := range nodes {
-				if newNode != n.ID && !utils.Contains(n.KnownNodes, newNode) {
-					n.KnownNodes = append(n.KnownNodes, newNode)
-					utils.LogInfo("Added new node to known nodes: %s", newNode)
-				}
-			}
-			n.mutex.Unlock()
-			utils.LogInfo("Successfully connected to network via node %s", node)
+		if visited[node] || node == n.ID {
+			continue
 		}
+		visited[node] = true
+
+		utils.LogInfo("Discovering peers from %s", node)
+		peers, err := n.getNodePeers(node)
+		if err != nil {
+			utils.LogError("Error discovering peers from %s: %v", node, err)
+			continue
+		}
+
+		n.mutex.Lock()
+		for _, peer := range peers {
+			if !utils.Contains(n.KnownNodes, peer) {
+				n.KnownNodes = append(n.KnownNodes, peer)
+				initialNodes = append(initialNodes, peer)
+				utils.LogInfo("Discovered new node: %s", peer)
+			}
+		}
+		n.mutex.Unlock()
 	}
+}
+
+func (n *Node) getNodePeers(node string) ([]string, error) {
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://%s/nodes", node))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var peers []string
+	if err := json.NewDecoder(resp.Body).Decode(&peers); err != nil {
+		return nil, err
+	}
+
+	return peers, nil
 }
 
 // RegisterWithNode registers the current node with another node

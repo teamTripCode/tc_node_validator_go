@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -20,6 +21,9 @@ func main() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
 	log.SetOutput(os.Stdout)
 
+	seedNodes := flag.String("seed", "", "Comma-separated list of seed nodes")
+	//	externalIP := flag.String("ip", "0.0.0.0", "External IP address for node")
+
 	// Parse command line flags
 	portFlag := flag.Int("port", 3000, "Port to listen on")
 	verboseFlag := flag.Bool("verbose", true, "Enable detailed logging")
@@ -32,6 +36,13 @@ func main() {
 	// Create new node
 	node := p2p.NewNode(*portFlag)
 	utils.PrintStartupMessage(node.ID, *portFlag)
+
+	if *seedNodes != "" {
+		nodes := strings.Split(*seedNodes, ",")
+		for _, n := range nodes {
+			node.AddNode(n)
+		}
+	}
 
 	// Create data directories
 	txDataDir := *dataDirFlag + "/tx_chain"
@@ -91,6 +102,12 @@ func main() {
 	server.StartBackgroundProcessing()
 	utils.LogInfo("Background processing started")
 
+	// Sincronización inicial
+	server.SyncChains()
+
+	// Actualizar validadores desde contrato
+	go updateValidatorsPeriodically(server)
+
 	// Start node monitoring
 	go node.StartHeartbeat()
 	utils.LogInfo("Node heartbeat started")
@@ -120,4 +137,31 @@ func setupGracefulShutdown() {
 		// Add resource cleanup here
 		os.Exit(0)
 	}()
+}
+
+func updateValidatorsPeriodically(s *p2p.Server) {
+	ticker := time.NewTicker(5 * time.Minute)
+	for {
+		select {
+		case <-ticker.C:
+			validators, err := getCurrentValidators(s.TxChain)
+			if err == nil {
+				dpos := s.TxChain.GetConsensus().(*consensus.DPoS)
+				validatorInfos := make([]consensus.ValidatorInfo, len(validators))
+				for i, v := range validators {
+					validatorInfos[i] = consensus.ValidatorInfo{Address: v}
+				}
+				dpos.UpdateValidators(validatorInfos)
+			} else {
+				utils.LogError("Failed to get current validators: %v", err)
+			}
+		}
+	}
+}
+
+// getCurrentValidators retrieves the current validators from the transaction chain.
+func getCurrentValidators(txChain *blockchain.Blockchain) ([]string, error) {
+	// Placeholder implementation: Replace with actual logic to fetch validators.
+	// For example, this could involve querying a smart contract or reading from the blockchain state.
+	return []string{"validator1", "validator2", "validator3"}, nil
 }

@@ -6,11 +6,26 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"tripcodechain_go/blockchain"
 	"tripcodechain_go/utils"
 )
+
+type BlockMessage struct {
+	Block     *blockchain.Block
+	Signature string
+	NodeID    string
+}
+
+// signBlock generates a digital signature for a block hash using the private key
+func (s *Server) signBlock(hash string, privateKey string) string {
+	// Implement the signing logic here
+	// For example, use an RSA or ECDSA signing algorithm
+	// This is a placeholder implementation
+	return fmt.Sprintf("signed(%s, %s)", hash, privateKey)
+}
 
 // ProcessTxMempool creates new blocks from pending transactions
 func (s *Server) ProcessTxMempool() {
@@ -91,21 +106,31 @@ func (s *Server) ProcessCriticalMempool() {
 	s.BroadcastNewBlock(block, "critical")
 }
 
-// BroadcastNewBlock sends a new block to all known nodes
 func (s *Server) BroadcastNewBlock(block *blockchain.Block, chainType string) {
+	message := BlockMessage{
+		Block:  block,
+		NodeID: s.Node.ID,
+	}
+
+	// Firmar el bloque
+	message.Signature = s.signBlock(block.Hash, s.Node.PrivateKey)
+
 	blockData, _ := json.Marshal(block)
 
 	for _, node := range s.Node.GetKnownNodes() {
 		if node != s.Node.ID {
-			url := fmt.Sprintf("http://%s/block/%s", node, chainType)
-			utils.LogDebug("Broadcasting new block to %s", node)
+			go func(n string) {
+				url := fmt.Sprintf("http://%s/block/%s", node, chainType)
+				req, _ := http.NewRequest("POST", url, bytes.NewBuffer(blockData))
+				req.Header.Set("X-Node-ID", s.Node.ID)
+				req.Header.Set("X-Signature", message.Signature)
 
-			_, err := http.Post(url, "application/json", bytes.NewBuffer(blockData))
-			if err != nil {
-				utils.LogError("Error broadcasting block to %s: %v", node, err)
-			} else {
-				utils.LogInfo("Successfully broadcast block to %s", node)
-			}
+				client := &http.Client{Timeout: 5 * time.Second}
+				resp, err := client.Do(req)
+				if err == nil && resp.StatusCode == http.StatusOK {
+					utils.LogInfo("Block accepted by %s", n)
+				}
+			}(node)
 		}
 	}
 }
@@ -151,4 +176,58 @@ func (s *Server) calculateTotalFees(transactions []*blockchain.Transaction) floa
 		totalFees += float64(tx.GasLimit) * 0.0001 // Simple fee calculation
 	}
 	return totalFees
+}
+
+func (s *Server) SyncChains() {
+	utils.LogInfo("Starting blockchain synchronization...")
+
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		s.syncChain(s.TxChain, "tx")
+	}()
+
+	go func() {
+		defer wg.Done()
+		s.syncChain(s.CriticalChain, "critical")
+	}()
+
+	wg.Wait()
+	utils.LogInfo("Blockchain synchronization completed")
+}
+
+func (s *Server) syncChain(chain *blockchain.Blockchain, chainType string) {
+	var bestChain []*blockchain.Block
+	maxLength := chain.GetLength()
+
+	for _, node := range s.Node.GetKnownNodes() {
+		if node == s.Node.ID {
+			continue
+		}
+
+		url := fmt.Sprintf("http://%s/chain/%s", node, chainType)
+		resp, err := http.Get(url)
+		if err != nil {
+			continue
+		}
+		defer resp.Body.Close()
+
+		var remoteChain []*blockchain.Block
+		if err := json.NewDecoder(resp.Body).Decode(&remoteChain); err != nil {
+			continue
+		}
+
+		isValid, err := chain.IsValidChain(remoteChain)
+		if len(remoteChain) > maxLength && err == nil && isValid {
+			maxLength = len(remoteChain)
+			bestChain = remoteChain
+		}
+	}
+
+	if bestChain != nil {
+		utils.LogInfo("Replacing %s chain with new chain (length: %d)", chainType, maxLength)
+		chain.ReplaceChain(bestChain)
+	}
 }
