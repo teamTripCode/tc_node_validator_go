@@ -10,6 +10,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/util"
 
+	"tripcodechain_go/currency"
 	"tripcodechain_go/utils"
 )
 
@@ -236,6 +237,11 @@ func (bdb *BlockchainDB) GetAllContracts() ([]*Contract, error) {
 		if err := json.Unmarshal(iter.Value(), &contract); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal contract: %v", err)
 		}
+
+		if contract.Balance == nil {
+			contract.Balance = currency.NewBalance(0)
+		}
+
 		contracts = append(contracts, &contract)
 	}
 

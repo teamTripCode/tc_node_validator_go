@@ -76,13 +76,13 @@ type ContractState map[string]string
 
 // Contract representa un contrato inteligente en la blockchain
 type Contract struct {
-	Address     string
-	Creator     string
-	Code        []*ContractOperation
-	State       ContractState
-	Balance     *currency.Balance
-	CreatedAt   time.Time
-	LastUpdated time.Time
+	Address     string               `json:"address"`
+	Creator     string               `json:"creator"`
+	Code        []*ContractOperation `json:"code"`
+	State       ContractState        `json:"state"`
+	Balance     *currency.Balance    `json:"balance"`
+	CreatedAt   time.Time            `json:"created_at"`
+	LastUpdated time.Time            `json:"last_updated"`
 }
 
 /**
@@ -110,6 +110,9 @@ func NewContractManager(currencyManager *currency.CurrencyManager, db *Blockchai
 	} else {
 		// Add contracts to in-memory cache
 		for _, contract := range contracts {
+			if contract.Balance == nil {
+				contract.Balance = currency.NewBalance(0)
+			}
 			cm.contracts[contract.Address] = contract
 		}
 		utils.LogInfo("Loaded %d contracts from database", len(contracts))

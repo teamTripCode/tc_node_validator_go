@@ -1,6 +1,7 @@
 package currency
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"sync"
@@ -616,5 +617,24 @@ func (cm *CurrencyManager) ProcessBlockRewards(validator string, fees *Balance) 
 		return err
 	}
 
+	return nil
+}
+
+// currency/currency.go
+
+func (b *Balance) MarshalJSON() ([]byte, error) {
+	return json.Marshal(b.String())
+}
+
+func (b *Balance) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	newBalance, err := NewBalanceFromString(s)
+	if err != nil {
+		return err
+	}
+	*b = *newBalance
 	return nil
 }
