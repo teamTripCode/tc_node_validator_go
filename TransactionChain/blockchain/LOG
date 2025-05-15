@@ -1,0 +1,36 @@
+=============== May 11, 2025 (-05) ===============
+19:02:21.322913 log@legend F·NumFile S·FileSize N·Entry C·BadEntry B·BadBlock Ke·KeyError D·DroppedEntry L·Level Q·SeqNum T·TimeElapsed
+19:02:21.342013 db@open opening
+19:02:21.343035 version@stat F·[] S·0B[] Sc·[]
+19:02:21.344660 db@janitor F·2 G·0
+19:02:21.344660 db@open done T·2.6471ms
+=============== May 11, 2025 (-05) ===============
+19:06:55.421646 log@legend F·NumFile S·FileSize N·Entry C·BadEntry B·BadBlock Ke·KeyError D·DroppedEntry L·Level Q·SeqNum T·TimeElapsed
+19:06:55.439198 version@stat F·[] S·0B[] Sc·[]
+19:06:55.439198 db@open opening
+19:06:55.439198 journal@recovery F·1
+19:06:55.439748 journal@recovery recovering @1
+19:06:55.442472 memdb@flush created L0@2 N·2 S·384B "blo..944,v2":"blo..x_0,v1"
+19:06:55.442992 version@stat F·[1] S·384B[384B] Sc·[0.25]
+19:06:55.447763 db@janitor F·3 G·0
+19:06:55.447763 db@open done T·8.5652ms
+=============== May 14, 2025 (-05) ===============
+19:35:30.848190 log@legend F·NumFile S·FileSize N·Entry C·BadEntry B·BadBlock Ke·KeyError D·DroppedEntry L·Level Q·SeqNum T·TimeElapsed
+19:35:30.866589 version@stat F·[1] S·384B[384B] Sc·[0.25]
+19:35:30.866589 db@open opening
+19:35:30.866589 journal@recovery F·1
+19:35:30.867109 journal@recovery recovering @3
+19:35:30.869760 memdb@flush created L0@5 N·2 S·384B "blo..c62,v5":"blo..x_0,v4"
+19:35:30.870273 version@stat F·[2] S·768B[768B] Sc·[0.50]
+19:35:30.875522 db@janitor F·4 G·0
+19:35:30.875522 db@open done T·8.933ms
+=============== May 14, 2025 (-05) ===============
+19:35:33.356983 log@legend F·NumFile S·FileSize N·Entry C·BadEntry B·BadBlock Ke·KeyError D·DroppedEntry L·Level Q·SeqNum T·TimeElapsed
+19:35:33.374095 version@stat F·[2] S·768B[768B] Sc·[0.50]
+19:35:33.374095 db@open opening
+19:35:33.374095 journal@recovery F·1
+19:35:33.374646 journal@recovery recovering @6
+19:35:33.377391 memdb@flush created L0@8 N·2 S·384B "blo..4c5,v8":"blo..x_0,v7"
+19:35:33.378508 version@stat F·[3] S·1KiB[1KiB] Sc·[0.75]
+19:35:33.382742 db@janitor F·5 G·0
+19:35:33.382742 db@open done T·8.6465ms

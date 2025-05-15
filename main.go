@@ -33,11 +33,31 @@ func main() {
 	node := p2p.NewNode(*portFlag)
 	utils.PrintStartupMessage(node.ID, *portFlag)
 
-	// Inicializar cadenas de bloques
-	txChain := blockchain.NewBlockchain(blockchain.TransactionBlock)
-	criticalChain := blockchain.NewBlockchain(blockchain.CriticalProcessBlock)
-	utils.LogInfo("Cadenas inicializadas - Transacciones: %d bloques, Críticos: %d bloques",
-		txChain.GetLength(), criticalChain.GetLength())
+	// Inicializar cadena de bloques (Transactions)
+	txChain, _, _, err := blockchain.InitializeBlockchain("TransactionChain", blockchain.TransactionBlock)
+	if err != nil {
+		log.Fatal("Error inicializando la cadena de bloques de transacciones:", err)
+	}
+	TxBlockType := txChain.GetBlockType()
+	TxChain, err := blockchain.NewBlockchain(TxBlockType, "TransactionChain")
+	if err != nil {
+		log.Fatal("Error inicializando la cadena de transacciones:", err)
+	}
+	utils.LogInfo("Cadenas inicializadas - Transacciones: %d bloques",
+		txChain.GetLength(), TxChain.GetLength())
+
+	// Inicializar cadena de bloques (Procesos Criticos)
+	txCriticalChain, _, _, err := blockchain.InitializeBlockchain("ProccessChain", blockchain.CriticalProcessBlock)
+	if err != nil {
+		log.Fatal("Error inicializando la cadena de bloques de procesos:", err)
+	}
+	TxBlockType = txCriticalChain.GetBlockType()
+	TxChain, err = blockchain.NewBlockchain(TxBlockType, "ProccessChain")
+	if err != nil {
+		log.Fatal("Error inicializando la cadena de bloques críticos:", err)
+	}
+	utils.LogInfo("Cadenas inicializadas - Transacciones Críticas: %d bloques",
+		txChain.GetLength(), TxChain.GetLength())
 
 	// Inicializar sistema económico
 	currencyManager := blockchain.InitNativeToken(txChain, "TC", 1000000)
@@ -56,7 +76,7 @@ func main() {
 
 	// Asignar consensos a las cadenas correspondientes
 	txChain.SetConsensus(consensusTx)
-	criticalChain.SetConsensus(consensusCritical)
+	txCriticalChain.SetConsensus(consensusCritical)
 	utils.LogInfo("Sistema de consenso dual configurado - DPoS para transacciones, PBFT para procesos críticos")
 
 	// Desplegar contratos del sistema
@@ -70,7 +90,7 @@ func main() {
 		txMempool.GetSize(), criticalMempool.GetSize())
 
 	// Configurar e iniciar servidor
-	server := p2p.NewServer(node, txChain, criticalChain, txMempool, criticalMempool)
+	server := p2p.NewServer(node, txChain, txCriticalChain, txMempool, criticalMempool)
 
 	// Iniciar procesos en segundo plano
 	server.StartBackgroundProcessing()

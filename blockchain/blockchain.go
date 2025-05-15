@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
 	"sync"
 	"time"
 
@@ -19,11 +20,23 @@ import (
  * as well as concurrency protection using a mutex.
  */
 type Blockchain struct {
-	blocks     []*Block     // Ordered list of blocks in the chain
-	blockType  BlockType    // Type of blocks this blockchain accepts
-	difficulty int          // Mining difficulty (number of leading zeros required)
-	mutex      sync.RWMutex // Mutex to ensure thread-safe access to the blockchain
-	consensus  interface{}  // Interface to the consensus mechanism
+	blocks          []*Block     // Ordered list of blocks in the chain
+	blockType       BlockType    // Type of blocks this blockchain accepts
+	difficulty      int          // Mining difficulty (number of leading zeros required)
+	mutex           sync.RWMutex // Mutex to ensure thread-safe access to the blockchain
+	consensus       any          // Interface to the consensus mechanism
+	db              *BlockchainDB
+	currencyManager *currency.CurrencyManager // Reference to the CurrencyManager
+}
+
+/**
+ * GetCurrencyManager returns the CurrencyManager associated with this blockchain.
+ *
+ * Returns:
+ *   - *currency.CurrencyManager: The CurrencyManager instance
+ */
+func (bc *Blockchain) GetCurrencyManager() *currency.CurrencyManager {
+	return bc.currencyManager
 }
 
 // Códigos de operación para el lenguaje del contrato
@@ -58,12 +71,13 @@ type SystemContract struct {
 type ContractManager struct {
 	contracts       map[string]*Contract
 	currencyManager *currency.CurrencyManager
+	db              *BlockchainDB
 }
 
 // ContractOperation representa una operación en el código del contrato
 type ContractOperation struct {
 	OpCode string
-	Args   []interface{}
+	Args   []any
 }
 
 // ContractState representa el estado de un contrato
@@ -78,6 +92,54 @@ type Contract struct {
 	Balance     *currency.Balance
 	CreatedAt   time.Time
 	LastUpdated time.Time
+}
+
+// NewContractManager creates a new instance of ContractManager with database support
+func NewContractManager(currencyManager *currency.CurrencyManager, db *BlockchainDB) *ContractManager {
+	cm := &ContractManager{
+		contracts:       make(map[string]*Contract),
+		currencyManager: currencyManager,
+		db:              db,
+	}
+
+	// Load existing contracts from database
+	contracts, err := db.GetAllContracts()
+	if err != nil {
+		utils.LogError("Failed to load contracts from database: %v", err)
+	} else {
+		// Add contracts to in-memory cache
+		for _, contract := range contracts {
+			cm.contracts[contract.Address] = contract
+		}
+		utils.LogInfo("Loaded %d contracts from database", len(contracts))
+	}
+
+	return cm
+}
+
+// Initialize system with data directory
+func InitializeBlockchain(dataDir string, blockType BlockType) (*Blockchain, *ContractManager, *currency.CurrencyManager, error) {
+	// Create base directory if it doesn't exist
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to create data directory: %v", err)
+	}
+
+	// Initialize blockchain
+	blockchain, err := NewBlockchain(blockType, dataDir)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to initialize blockchain: %v", err)
+	}
+
+	// Initialize currency manager
+	currencyManager := currency.NewCurrencyManager()
+
+	// Initialize native token
+	currencyManager = InitNativeToken(blockchain, "TCC", 100000000) // 100M initial supply
+
+	// Initialize contract manager
+	contractManager := NewContractManager(currencyManager, blockchain.db)
+
+	return blockchain, contractManager, currencyManager, nil
 }
 
 /**
@@ -134,14 +196,6 @@ func NewSystemContract(name string) *SystemContract {
 		Address:   address,
 		State:     make(map[string]string),
 		CreatedAt: time.Now(),
-	}
-}
-
-// NewContractManager crea una nueva instancia de ContractManager
-func NewContractManager(currencyManager *currency.CurrencyManager) *ContractManager {
-	return &ContractManager{
-		contracts:       make(map[string]*Contract),
-		currencyManager: currencyManager,
 	}
 }
 
@@ -202,31 +256,26 @@ func InitNativeToken(chain *Blockchain, symbol string, initialSupply int) *curre
 	return cm
 }
 
-// CreateContract crea un nuevo contrato en la blockchain
+// CreateContract creates a new contract in the blockchain with database persistence
 func (cm *ContractManager) CreateContract(creator string, code []*ContractOperation, initialState ContractState, initialBalance *currency.Balance) (*Contract, error) {
-	// Verificar que el creador tiene suficientes fondos
+	// Check if creator has sufficient funds (logic similar to original implementation)
 	if initialBalance.Cmp(big.NewInt(0)) > 0 {
-		// Determine which version of GetBalance to use based on how it's implemented in CurrencyManager
-
-		// Option 1: If GetBalance returns only a balance (no error)
 		creatorBalance := cm.currencyManager.GetBalance(creator)
-
-		// Compare creator's balance with the initial balance required
 		if creatorBalance.Cmp(initialBalance.Int) < 0 {
-			return nil, errors.New("fondos insuficientes para crear contrato")
+			return nil, errors.New("insufficient funds to create contract")
 		}
 
-		// Transferir fondos al contrato
+		// Transfer funds to the contract
 		err := cm.currencyManager.TransferFunds(creator, "contract_creation", initialBalance)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	// Generar dirección del contrato
+	// Generate contract address
 	contractAddress := generateContractAddress(creator, code, time.Now().UnixNano())
 
-	// Crear el contrato
+	// Create the contract
 	contract := &Contract{
 		Address:     contractAddress,
 		Creator:     creator,
@@ -237,23 +286,20 @@ func (cm *ContractManager) CreateContract(creator string, code []*ContractOperat
 		LastUpdated: time.Now(),
 	}
 
-	// Registrar el contrato
+	// Save contract to database first to ensure persistence
+	if err := cm.db.SaveContract(contract); err != nil {
+		return nil, fmt.Errorf("failed to save contract to database: %v", err)
+	}
+
+	// Register contract in memory cache
 	cm.contracts[contractAddress] = contract
 
-	return contract, nil
-}
-
-// GetContract devuelve un contrato por su dirección
-func (cm *ContractManager) GetContract(address string) (*Contract, error) {
-	contract, exists := cm.contracts[address]
-	if !exists {
-		return nil, errors.New("contrato no encontrado")
-	}
+	utils.LogInfo("Contract created at address %s by %s", contractAddress, creator)
 	return contract, nil
 }
 
 // generateContractAddress genera una dirección única para un contrato
-func generateContractAddress(creator string, code []*ContractOperation, timestamp int64) string {
+func generateContractAddress(creator string, _ []*ContractOperation, timestamp int64) string {
 	// En una implementación real, esto usaría hash criptográficos
 	return fmt.Sprintf("contract_%s_%d", creator[:8], timestamp)
 }
@@ -265,43 +311,54 @@ func OpBalanceOf(address interface{}) string {
 
 // Añadir métodos a la estructura Blockchain para soportar contratos
 
-// GetCurrencyManager devuelve el gestor de moneda de la blockchain
-func (bc *Blockchain) GetCurrencyManager() *currency.CurrencyManager {
-	// En una implementación real, esto estaría almacenado como campo en la estructura Blockchain
-	// Para este ejemplo, creamos uno nuevo
-	return currency.NewCurrencyManager()
-}
-
-// RegisterSystemContract registra un contrato como contrato del sistema
+// RegisterSystemContract registers a contract as a system contract
 func (bc *Blockchain) RegisterSystemContract(name string, address string) {
-	// En una implementación real, esto almacenaría el contrato en una estructura de datos persistente
-	utils.LogInfo("Registrando contrato del sistema: %s en dirección %s", name, address)
+	utils.LogInfo("Registering system contract: %s at address %s", name, address)
 
-	// Añadir un bloque a la cadena para registrar este evento
+	// Save contract registration to database
+	if err := bc.db.RegisterSystemContract(name, address); err != nil {
+		utils.LogError("Failed to register system contract in database: %v", err)
+		return
+	}
+
+	// Add a block to the chain to record this event (optional)
 	newBlock := bc.CreateBlock()
 	newBlock.Data = fmt.Sprintf("RegisterSystemContract:%s:%s", name, address)
 	newBlock.ForgeBlock("system_registration")
 	bc.AddBlock(newBlock)
 }
 
-// DeploySystemContracts despliega todos los contratos del sistema
-func DeploySystemContracts(chain *Blockchain) {
-	// Obtener el CurrencyManager de la blockchain
-	currencyManager := chain.GetCurrencyManager()
+// GetSystemContract retrieves a system contract by name
+func (bc *Blockchain) GetSystemContract(name string) (string, error) {
+	address, err := bc.db.GetSystemContractAddress(name)
+	if err != nil {
+		return "", err
+	}
+	return address, nil
+}
 
-	// Crear ContractManager
-	contractManager := NewContractManager(currencyManager)
+// DeploySystemContracts deploys all system contracts
+func DeploySystemContracts(chain *Blockchain, contractManager *ContractManager) {
+	// Check if system contracts are already deployed
+	_, err := chain.GetSystemContract("governance")
+	if err == nil {
+		utils.LogInfo("System contracts already deployed, skipping deployment")
+		return
+	}
 
-	// 1. Contrato de Gobernanza
+	// // Get the CurrencyManager of the blockchain
+	// currencyManager := chain.GetCurrencyManager()
+
+	// 1. Governance Contract
 	deployGovernanceContract(contractManager, chain)
 
-	// 2. Registro de Validadores
+	// 2. Validator Registry
 	deployValidatorRegistry(contractManager, chain)
 
-	// 3. Sistema de Recompensas
+	// 3. Rewards System
 	deployRewardsSystem(contractManager, chain)
 
-	utils.LogInfo("Sistema de contratos base desplegado")
+	utils.LogInfo("Base contract system deployed")
 }
 
 func deployGovernanceContract(cm *ContractManager, chain *Blockchain) {
@@ -431,36 +488,65 @@ func deployRewardsSystem(cm *ContractManager, chain *Blockchain) {
 	utils.LogInfo("Sistema de Recompensas desplegado: %s", contract.Address)
 }
 
-/**
- * NewBlockchain initializes a new blockchain with a genesis block.
- *
- * Parameters:
- *   - blockType: The type of blocks that will be added to this chain
- *
- * Returns:
- *   - A pointer to the newly created blockchain
- */
-func NewBlockchain(blockType BlockType) *Blockchain {
+// NewBlockchain initializes a new blockchain with a genesis block.
+// Parameters:
+//   - blockType: The type of blocks that will be added to this chain
+//   - dataDir: Directory where blockchain data will be stored
+//
+// Returns:
+//   - A pointer to the newly created blockchain
+func NewBlockchain(blockType BlockType, dataDir string) (*Blockchain, error) {
+	// Create data directory if it doesn't exist
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create data directory: %v", err)
+	}
+
+	// Initialize blockchain DB
+	db, err := NewBlockchainDB(dataDir)
+	if err != nil {
+		return nil, err
+	}
+
 	blockchain := &Blockchain{
 		blocks:     make([]*Block, 0),
 		blockType:  blockType,
 		difficulty: 2, // Initial difficulty for mining
+		db:         db,
 	}
 
-	// Create genesis block
-	genesisBlock := NewBlock(0, "0", blockType)
-	genesisBlock.ForgeBlock("genesis")
-	blockchain.blocks = append(blockchain.blocks, genesisBlock)
+	// Check if blockchain already exists
+	height, err := db.GetBlockchainHeight()
+	if err != nil {
+		utils.LogError("Error getting blockchain height: %v", err)
+	}
 
-	return blockchain
+	if height > 0 {
+		// Blockchain exists, load blocks from database
+		utils.LogInfo("Loading existing blockchain with height %d", height)
+		blocks, err := db.GetAllBlocks()
+		if err != nil {
+			return nil, fmt.Errorf("failed to load blockchain: %v", err)
+		}
+		blockchain.blocks = blocks
+	} else {
+		// Create genesis block
+		utils.LogInfo("Creating new blockchain with genesis block")
+		genesisBlock := NewBlock(0, "0", blockType)
+		genesisBlock.ForgeBlock("genesis")
+		blockchain.blocks = append(blockchain.blocks, genesisBlock)
+
+		// Save genesis block to database
+		if err := db.SaveBlock(genesisBlock); err != nil {
+			return nil, fmt.Errorf("failed to save genesis block: %v", err)
+		}
+	}
+
+	return blockchain, nil
 }
 
-/**
- * CreateBlock generates a new block based on the latest block in the chain.
- *
- * Returns:
- *   - A pointer to the newly created block
- */
+// CreateBlock generates a new block based on the latest block in the chain.
+// Returns:
+//   - A pointer to the newly created block
 func (bc *Blockchain) CreateBlock() *Block {
 	bc.mutex.RLock()
 	lastBlock := bc.blocks[len(bc.blocks)-1]
@@ -470,25 +556,32 @@ func (bc *Blockchain) CreateBlock() *Block {
 	return newBlock
 }
 
-/**
- * AddBlock adds a validated block to the blockchain.
- *
- * Parameters:
- *   - block: The block to add to the chain
- *
- * Returns:
- *   - bool: True if the block was added successfully, false otherwise
- */
+// AddBlock adds a validated block to the blockchain.
+// Parameters:
+//   - block: The block to add to the chain
+//
+// Returns:
+//   - bool: True if the block was added successfully, false otherwise
 func (bc *Blockchain) AddBlock(block *Block) bool {
 	bc.mutex.Lock()
 	defer bc.mutex.Unlock()
 
 	// Validate the block before adding it
 	if !bc.isValidBlock(block) {
+		utils.LogError("Attempted to add invalid block %d", block.Index)
 		return false
 	}
 
+	// Save to database first to ensure persistence
+	if err := bc.db.SaveBlock(block); err != nil {
+		utils.LogError("Failed to save block %d to database: %v", block.Index, err)
+		return false
+	}
+
+	// Add to in-memory cache
 	bc.blocks = append(bc.blocks, block)
+
+	utils.LogInfo("Block %d added to blockchain with hash %s", block.Index, block.Hash)
 	return true
 }
 
@@ -579,15 +672,12 @@ func (bc *Blockchain) GetBlocks() []*Block {
 	return bc.blocks
 }
 
-/**
- * ReplaceChain replaces the current chain with a new one if it's longer and valid.
- *
- * Parameters:
- *   - newBlocks: Slice of blocks representing the candidate chain
- *
- * Returns:
- *   - bool: True if the chain was replaced, false otherwise
- */
+// ReplaceChain replaces the current chain with a new one if it's longer and valid.
+// Parameters:
+//   - newBlocks: Slice of blocks representing the candidate chain
+//
+// Returns:
+//   - bool: True if the chain was replaced, false otherwise
 func (bc *Blockchain) ReplaceChain(newBlocks []*Block) bool {
 	bc.mutex.Lock()
 	defer bc.mutex.Unlock()
@@ -602,8 +692,17 @@ func (bc *Blockchain) ReplaceChain(newBlocks []*Block) bool {
 		return false
 	}
 
-	// Replace the chain
+	// Save all blocks to database
+	for _, block := range newBlocks {
+		if err := bc.db.SaveBlock(block); err != nil {
+			utils.LogError("Failed to save block during chain replacement: %v", err)
+			return false
+		}
+	}
+
+	// Replace the in-memory chain
 	bc.blocks = newBlocks
+	utils.LogInfo("Blockchain replaced with new chain of length %d", len(newBlocks))
 	return true
 }
 
