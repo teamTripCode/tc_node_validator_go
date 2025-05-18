@@ -6,6 +6,12 @@ import (
 	"tripcodechain_go/currency"
 )
 
+// MempoolItem interface for items that can be stored in the mempool
+type MempoolItem interface {
+	GetID() string
+	GetTimestamp() string
+}
+
 /**
  * Blockchain represents the chain of blocks.
  * It includes metadata like block type and mining difficulty,
