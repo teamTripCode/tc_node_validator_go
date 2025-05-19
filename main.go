@@ -2,7 +2,9 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -41,6 +43,16 @@ func main() {
 		nodes := strings.Split(*seedNodes, ",")
 		for _, n := range nodes {
 			node.AddNode(n)
+			// Registrar este nodo en el semilla
+			go func(seed string) {
+				client := &http.Client{Timeout: 2 * time.Second}
+				url := fmt.Sprintf("http://%s/register", seed)
+				req, _ := http.NewRequest("POST", url, strings.NewReader(node.ID))
+				resp, err := client.Do(req)
+				if err == nil && resp.StatusCode == http.StatusCreated {
+					utils.LogInfo("Registrado exitosamente en el semilla %s", seed)
+				}
+			}(n)
 		}
 	}
 

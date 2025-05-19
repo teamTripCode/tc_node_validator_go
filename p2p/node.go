@@ -74,34 +74,25 @@ func (n *Node) PingNode(node string) {
 
 // DiscoverNodes attempts to connect to known nodes
 func (n *Node) DiscoverNodes() {
-	initialNodes := n.GetKnownNodes()
-	visited := make(map[string]bool)
+	knownNodes := n.GetKnownNodes()
 
-	for len(initialNodes) > 0 {
-		node := initialNodes[0]
-		initialNodes = initialNodes[1:]
-
-		if visited[node] || node == n.ID {
+	for _, node := range knownNodes {
+		if node == n.ID {
 			continue
 		}
-		visited[node] = true
 
-		utils.LogInfo("Discovering peers from %s", node)
 		peers, err := n.getNodePeers(node)
 		if err != nil {
-			utils.LogError("Error discovering peers from %s: %v", node, err)
+			utils.LogError("Error obteniendo peers de %s: %v", node, err)
 			continue
 		}
 
-		n.mutex.Lock()
 		for _, peer := range peers {
-			if !utils.Contains(n.KnownNodes, peer) {
-				n.KnownNodes = append(n.KnownNodes, peer)
-				initialNodes = append(initialNodes, peer)
-				utils.LogInfo("Discovered new node: %s", peer)
+			if !utils.Contains(n.KnownNodes, peer) && peer != n.ID {
+				n.AddNode(peer)
+				utils.LogInfo("Nodo descubierto: %s", peer)
 			}
 		}
-		n.mutex.Unlock()
 	}
 }
 
