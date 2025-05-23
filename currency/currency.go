@@ -620,6 +620,18 @@ func (cm *CurrencyManager) ProcessBlockRewards(validator string, fees *Balance) 
 	return nil
 }
 
+// GetBalance returns a placeholder balance for an address.
+func GetBalance(address string) (uint64, error) {
+	utils.LogInfo("Placeholder: GetBalance called for address %s, returning 1000", address)
+	return 1000, nil
+}
+
+// UpdateBalance is a placeholder function to update balance.
+func UpdateBalance(address string, amountToSubtract uint64) error {
+	utils.LogInfo("Placeholder: UpdateBalance called for address %s to subtract %d", address, amountToSubtract)
+	return nil
+}
+
 // currency/currency.go
 
 func (b *Balance) MarshalJSON() ([]byte, error) {

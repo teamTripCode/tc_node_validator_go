@@ -15,13 +15,82 @@ import (
 
 	"tripcodechain_go/blockchain"
 	"tripcodechain_go/utils"
+	// "tripcodechain_go/p2p/node" // Not explicitly needed if NodeInfo is only used by NodeManager
 )
+
+// RequestBodyForRegisterNode is used to parse the JSON request for registering a node.
+type RequestBodyForRegisterNode struct {
+	Address string `json:"address"`
+}
+
+// RegisterNodeHandler returns an http.HandlerFunc for registering a new node.
+func RegisterNodeHandler(nodeManager *NodeManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var reqBody RequestBodyForRegisterNode
+		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+			http.Error(w, "Error decoding request body: "+err.Error(), http.StatusBadRequest)
+			utils.LogError("RegisterNodeHandler: Error decoding request body: %v", err)
+			return
+		}
+
+		if reqBody.Address == "" {
+			http.Error(w, "Node address cannot be empty", http.StatusBadRequest)
+			utils.LogError("RegisterNodeHandler: Node address is empty")
+			return
+		}
+
+		// Validate node address format (can use existing isValidNodeAddress or similar)
+		if !isValidNodeAddress(reqBody.Address) { // Assuming isValidNodeAddress is available or reimplemented
+			http.Error(w, "Invalid node address format", http.StatusBadRequest)
+			utils.LogError("RegisterNodeHandler: Invalid node address format: %s", reqBody.Address)
+			return
+		}
+
+		if err := nodeManager.AddNode(reqBody.Address); err != nil {
+			// AddNode currently always returns nil, but good practice to check.
+			http.Error(w, "Error registering node: "+err.Error(), http.StatusInternalServerError)
+			utils.LogError("RegisterNodeHandler: Error calling nodeManager.AddNode for %s: %v", reqBody.Address, err)
+			return
+		}
+
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprintf(w, "Node %s registered successfully", reqBody.Address)
+		utils.LogInfo("RegisterNodeHandler: Node %s registered successfully via /nodes endpoint", reqBody.Address)
+	}
+}
+
+// GetActiveNodesHandler returns an http.HandlerFunc for retrieving the list of active nodes.
+func GetActiveNodesHandler(nodeManager *NodeManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+			return
+		}
+
+		activeNodes := nodeManager.GetActiveNodes()
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(activeNodes); err != nil {
+			http.Error(w, "Error encoding response: "+err.Error(), http.StatusInternalServerError)
+			utils.LogError("GetActiveNodesHandler: Error encoding active nodes to JSON: %v", err)
+			return
+		}
+		utils.LogInfo("GetActiveNodesHandler: Responded with %d active nodes.", len(activeNodes))
+	}
+}
 
 type SeedNode struct {
 	nodeManager NodeManagerInterface
 }
 
 // GetNodesHandler returns the list of known nodes
+// This is the original GetNodesHandler, kept for now.
+// It might need to be updated or removed if it conflicts with GetActiveNodesHandler's purpose.
 func (s *Server) GetNodesHandler(w http.ResponseWriter, r *http.Request) {
 	utils.LogDebug("Received request for nodes list from %s", r.RemoteAddr)
 
@@ -29,8 +98,9 @@ func (s *Server) GetNodesHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(s.Node.GetKnownNodes())
 }
 
-// RegisterNodeHandler handles node registration requests
-func (s *Server) RegisterNodeHandler(w http.ResponseWriter, r *http.Request) {
+// OriginalRegisterNodeHandler handles node registration requests for the Server struct.
+// Renamed to avoid conflict with the new RegisterNodeHandler that uses NodeManager.
+func (s *Server) OriginalRegisterNodeHandler(w http.ResponseWriter, r *http.Request) {
 	var node string
 	if err := json.NewDecoder(r.Body).Decode(&node); err != nil {
 		http.Error(w, "Invalid node format", http.StatusBadRequest)
@@ -62,6 +132,7 @@ func (s *Server) RegisterNodeHandler(w http.ResponseWriter, r *http.Request) {
 		utils.LogError("Failed to register unreachable node: %s", node)
 	}
 }
+
 
 func isPingable(nodeAddr string) bool {
 	client := &http.Client{Timeout: 3 * time.Second}
