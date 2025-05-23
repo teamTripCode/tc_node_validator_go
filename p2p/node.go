@@ -12,6 +12,13 @@ import (
 	"tripcodechain_go/utils"
 )
 
+// NodeInfo represents information about a peer node in the network.
+type NodeInfo struct {
+	Address  string `json:"address"`
+	LastSeen int64  `json:"lastSeen"`
+	// IsActive bool   `json:"isActive"` // Will be determined dynamically or by lastSeen
+}
+
 // Node represents a node in the blockchain network
 type Node struct {
 	ID         string
