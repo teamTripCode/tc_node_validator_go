@@ -85,7 +85,7 @@ func GetActiveNodesHandler(nodeManager *NodeManager) http.HandlerFunc {
 }
 
 type SeedNode struct {
-	nodeManager NodeManagerInterface
+	nodeManager NodeManager
 }
 
 // GetNodesHandler returns the list of known nodes
@@ -132,7 +132,6 @@ func (s *Server) OriginalRegisterNodeHandler(w http.ResponseWriter, r *http.Requ
 		utils.LogError("Failed to register unreachable node: %s", node)
 	}
 }
-
 
 func isPingable(nodeAddr string) bool {
 	client := &http.Client{Timeout: 3 * time.Second}

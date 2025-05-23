@@ -1,8 +1,7 @@
 package contracts
 
 import (
-	"errors"
-	"fmt" // fmt is not strictly needed for this placeholder, but good for future use
+	"errors" // fmt is not strictly needed for this placeholder, but good for future use
 	"tripcodechain_go/utils"
 )
 
@@ -14,12 +13,12 @@ type Proposal struct {
 }
 
 // Vote defines a basic structure for a vote on a governance proposal.
-type Vote struct {
-	ProposalID   uint
-	VoterAddress string
-	VoteOption   bool // true for Yes, false for No
-	// Additional fields like VotePower, Timestamp, etc., can be added later.
-}
+// type Vote struct {
+// 	ProposalID   uint
+// 	VoterAddress string
+// 	VoteOption   bool // true for Yes, false for No
+// 	// Additional fields like VotePower, Timestamp, etc., can be added later.
+// }
 
 // GovernanceContract defines the structure for the governance contract.
 // It might hold state like a list of proposals, votes, etc., in a real implementation.

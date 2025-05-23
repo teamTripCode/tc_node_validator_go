@@ -1,8 +1,6 @@
 package blockchain
 
 import (
-	"fmt"
-	"tripcodechain_go/blockchain/constants" // Corrected import path
 	"tripcodechain_go/currency"
 	"tripcodechain_go/utils"
 )
@@ -14,8 +12,8 @@ func DistributeTransactionFees(blockCreatorAddress string, totalTransactionFees 
 		return nil
 	}
 
-	validatorShare := uint64(float64(totalTransactionFees) * constants.ValidatorFeeShare)
-	devFundShare := uint64(float64(totalTransactionFees) * constants.DevFundFeeShare)
+	validatorShare := uint64(float64(totalTransactionFees) * ValidatorFeeShare)
+	devFundShare := uint64(float64(totalTransactionFees) * DevFundFeeShare)
 	// Calculate burnShare as the remainder to ensure all fees are accounted for,
 	// especially if shares don't perfectly sum to 1.0 due to float precision.
 	burnShare := totalTransactionFees - validatorShare - devFundShare
@@ -33,7 +31,7 @@ func DistributeTransactionFees(blockCreatorAddress string, totalTransactionFees 
 			burnShare = 0
 		}
 	}
-	
+
 	// (Placeholder) Credit the block creator
 	// Assuming UpdateBalance subtracts, so a negative amount adds to balance.
 	// Or, if an AddBalance function exists, that would be cleaner.
@@ -49,12 +47,12 @@ func DistributeTransactionFees(blockCreatorAddress string, totalTransactionFees 
 	}
 
 	// (Placeholder) Credit the development fund
-	err = currency.UpdateBalance(constants.DevFundAddress, -devFundShare) // Subtracting a negative is adding
+	err = currency.UpdateBalance(DevFundAddress, -devFundShare) // Subtracting a negative is adding
 	if err != nil {
-		utils.LogError("Failed to credit development fund %s with fee share %d: %v", constants.DevFundAddress, devFundShare, err)
+		utils.LogError("Failed to credit development fund %s with fee share %d: %v", DevFundAddress, devFundShare, err)
 		// Similar error handling consideration as above.
 	} else {
-		utils.LogInfo("Credited development fund %s with %d TripCoins from transaction fees.", constants.DevFundAddress, devFundShare)
+		utils.LogInfo("Credited development fund %s with %d TripCoins from transaction fees.", DevFundAddress, devFundShare)
 	}
 
 	// Log the amount to be burned
@@ -65,7 +63,7 @@ func DistributeTransactionFees(blockCreatorAddress string, totalTransactionFees 
 	} else {
 		utils.LogInfo("No TripCoins to burn from transaction fees for this block.")
 	}
-	
+
 	utils.LogInfo("Transaction fees distributed: Validator: %d, DevFund: %d, Burned: %d", validatorShare, devFundShare, burnShare)
 
 	return nil

@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"slices"
-	"tripcodechain_go/blockchain"
 	"errors"
+	"slices"
 	"sort"
+	"tripcodechain_go/blockchain"
 	"tripcodechain_go/currency"
 	"tripcodechain_go/utils"
 )
@@ -60,7 +60,7 @@ type DPoS struct {
 	currencyManager  *currency.CurrencyManager
 	validators       map[string]*big.Int  // Validadores y su stake
 	bannedValidators map[string]time.Time // Map of banned validators and their ban expiration time
-	Validators       map[string]Validator   // Map of registered validators
+	Validators       map[string]Validator // Map of registered validators
 }
 
 // ValidatorInfo represents information about a validator
@@ -152,7 +152,6 @@ func (d *DPoS) SlashDelegate(address string, severity string) error {
 	// }
 	utils.LogInfo("Placeholder: BurnTokens would be called here for delegate %s, amount %s", address, penalty.TripCoinString())
 
-
 	// 5. Actualizar stake y reputación
 	penaltyFloat, _ := penaltyAmount.Float64()
 	delegate.Stake -= penaltyFloat // DelegateInfo.Stake is float64
@@ -230,7 +229,7 @@ func DistributeBlockReward(dpos *DPoS, blockCreatorAddress string) error {
 	// For now, we will simulate adding by logging, as direct addition with UpdateBalance
 	// with a positive reward and uint64 signature is not possible by "subtracting a negative".
 
-	rewardAmount := uint64(blockchain.BlockRewardAmount) // BlockRewardAmount is int, cast to uint64
+	// rewardAmount := uint64(blockchain.BlockRewardAmount) // BlockRewardAmount is int, cast to uint64
 
 	// Simulate adding the reward. The actual mechanism would be:
 	// err := HypotheticalAddBalanceFunction(blockCreatorAddress, rewardAmount)
@@ -1012,12 +1011,11 @@ func SelectDelegates(dpos *DPoS) error {
 		activeDelegateAddresses = append(activeDelegateAddresses, val.Address)
 		utils.LogInfo("Validator %s selected as active delegate. Votes: %d, Stake: %d", val.Address, val.TotalVotes, val.Stake)
 	}
-	
+
 	// This part seems to be from the old DPoS struct, we might need to adapt it or remove it
 	// For now, I'll keep it and log the active delegate addresses
-	// d.ActiveDelegates = activeDelegateAddresses 
+	// d.ActiveDelegates = activeDelegateAddresses
 	utils.LogInfo("Selected %d active delegates: %v", len(activeDelegateAddresses), activeDelegateAddresses)
-
 
 	utils.LogInfo("Successfully selected %d delegates.", numDelegates)
 	return nil
@@ -1065,7 +1063,6 @@ func SlashValidator(dpos *DPoS, validatorAddress string, penaltyPercentage float
 	//     return fmt.Errorf("failed to burn slashed tokens for validator %s: %w", validatorAddress, err)
 	// }
 	utils.LogInfo("Placeholder: Slashed tokens (%d) for validator %s would be burned here.", slashedAmount, validatorAddress)
-
 
 	return nil
 }
