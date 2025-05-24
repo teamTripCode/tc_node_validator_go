@@ -22,6 +22,7 @@ type NodeInfo struct {
 // Node represents a node in the blockchain network
 type Node struct {
 	ID         string
+	NodeType   string
 	Port       int
 	KnownNodes []string
 	PrivateKey string
@@ -121,7 +122,13 @@ func (n *Node) getNodePeers(node string) ([]string, error) {
 
 // RegisterWithNode registers the current node with another node
 func (n *Node) RegisterWithNode(node string) {
-	nodeData, _ := json.Marshal(n.ID)
+	nodeData, _ := json.Marshal(struct {
+		ID       string `json:"id"`
+		NodeType string `json:"nodeType"`
+	}{
+		ID:       n.ID,
+		NodeType: n.NodeType,
+	})
 	utils.LogDebug("Registering with node %s", node)
 
 	resp, err := http.Post(fmt.Sprintf("http://%s/register", node), "application/json", bytes.NewBuffer(nodeData))
