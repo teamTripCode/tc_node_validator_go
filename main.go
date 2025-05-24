@@ -25,7 +25,7 @@ func main() {
 	//	externalIP := flag.String("ip", "0.0.0.0", "External IP address for node")
 
 	// Parse command line flags
-	portFlag := flag.Int("port", 3000, "Port to listen on")
+	portFlag := flag.Int("port", 3001, "Port to listen on")
 	verboseFlag := flag.Bool("verbose", true, "Enable detailed logging")
 	dataDirFlag := flag.String("datadir", "data", "Directory for blockchain data")
 	flag.Parse()
@@ -35,6 +35,7 @@ func main() {
 
 	// Create new node
 	node := p2p.NewNode(*portFlag)
+	node.NodeType = "validator"
 	utils.PrintStartupMessage(node.ID, *portFlag)
 
 	if *seedNodes != "" {

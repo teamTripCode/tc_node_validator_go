@@ -92,10 +92,9 @@ type SeedNode struct {
 // This is the original GetNodesHandler, kept for now.
 // It might need to be updated or removed if it conflicts with GetActiveNodesHandler's purpose.
 func (s *Server) GetNodesHandler(w http.ResponseWriter, r *http.Request) {
-	utils.LogDebug("Received request for nodes list from %s", r.RemoteAddr)
-
+	nodes := s.Node.GetKnownNodes()
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(s.Node.GetKnownNodes())
+	json.NewEncoder(w).Encode(nodes)
 }
 
 // OriginalRegisterNodeHandler handles node registration requests for the Server struct.

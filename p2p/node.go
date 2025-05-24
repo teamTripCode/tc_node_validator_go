@@ -29,13 +29,23 @@ type Node struct {
 	mutex      sync.Mutex
 }
 
+type NodeRegistrationRequest struct {
+	Address  string `json:"address"`  // Dirección del nodo (ej: "localhost:3001")
+	NodeType string `json:"nodeType"` // Tipo de nodo (ej: "validator", "regular", "api", "seed")
+}
+
+type NodeStatus struct {
+	Address  string `json:"address"`
+	NodeType string `json:"nodeType"`
+}
+
 // NewNode creates a new node instance
 func NewNode(port int) *Node {
 	nodeID := fmt.Sprintf("localhost:%d", port)
 	return &Node{
 		ID:         nodeID,
 		Port:       port,
-		KnownNodes: []string{"localhost:3000", "localhost:3001"},
+		KnownNodes: []string{},
 		mutex:      sync.Mutex{},
 	}
 }
@@ -46,7 +56,7 @@ func (n *Node) StartHeartbeat() {
 	for {
 		select {
 		case <-ticker.C:
-			status := map[string]interface{}{
+			status := map[string]any{
 				"nodeId":     n.ID,
 				"timestamp":  time.Now().UTC().Format(time.RFC3339),
 				"knownNodes": n.GetKnownNodes(),
@@ -104,6 +114,7 @@ func (n *Node) DiscoverNodes() {
 	}
 }
 
+// En getNodePeers
 func (n *Node) getNodePeers(node string) ([]string, error) {
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(fmt.Sprintf("http://%s/nodes", node))
@@ -112,33 +123,51 @@ func (n *Node) getNodePeers(node string) ([]string, error) {
 	}
 	defer resp.Body.Close()
 
-	var peers []string
+	var peers []*NodeStatus
 	if err := json.NewDecoder(resp.Body).Decode(&peers); err != nil {
 		return nil, err
 	}
 
-	return peers, nil
+	// Extraer solo las direcciones
+	var addresses []string
+	for _, p := range peers {
+		addresses = append(addresses, p.Address)
+	}
+	return addresses, nil
 }
 
-// RegisterWithNode registers the current node with another node
 func (n *Node) RegisterWithNode(node string) {
-	nodeData, _ := json.Marshal(struct {
-		ID       string `json:"id"`
-		NodeType string `json:"nodeType"`
-	}{
-		ID:       n.ID,
-		NodeType: n.NodeType,
-	})
-	utils.LogDebug("Registering with node %s", node)
+	// Crea el cuerpo de la solicitud
+	reqBody := NodeRegistrationRequest{
+		Address:  n.ID,       // Ej: "localhost:3001"
+		NodeType: n.NodeType, // Ej: "validator"
+	}
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		utils.LogError("Error marshaling request: %v", err)
+		return
+	}
 
-	resp, err := http.Post(fmt.Sprintf("http://%s/register", node), "application/json", bytes.NewBuffer(nodeData))
+	// Crea la solicitud HTTP
+	url := fmt.Sprintf("http://%s/register", node)
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(bodyBytes))
+	if err != nil {
+		utils.LogError("Error creating request: %v", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json") // Requerido por el semilla
+
+	// Envía la solicitud
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		utils.LogError("Failed to register with node %s: %v", node, err)
 		return
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusCreated {
+	// Maneja la respuesta
+	if resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusOK {
 		utils.LogInfo("Successfully registered with node %s", node)
 	} else {
 		utils.LogError("Failed to register with node %s: HTTP %d", node, resp.StatusCode)
