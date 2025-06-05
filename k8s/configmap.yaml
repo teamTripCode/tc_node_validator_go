@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dpos-config
+  namespace: dpos-network
+data:
+  network: "kubernetes"
+  log_level: "info"
+  consensus_timeout: "5s"
+  block_interval: "2s"

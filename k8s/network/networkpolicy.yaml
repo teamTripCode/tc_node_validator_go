@@ -1,0 +1,28 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dpos-network-policy
+  namespace: dpos-network
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: dpos-network
+    - podSelector: {}
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: dpos-network
+    - podSelector: {}
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 53
+    - protocol: UDP
+      port: 53
