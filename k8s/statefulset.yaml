@@ -64,6 +64,10 @@ spec:
             name: validator-node-config
         - secretRef:
             name: validator-node-secrets
+        - name: MCP_LOG_LEVEL
+          value: "INFO"
+        - name: MCP_CONFIG_PATH
+          value: "/etc/tripcodechain/mcp/config.json"
         volumeMounts:
         - name: blockchain-data
           mountPath: /data
@@ -71,6 +75,9 @@ spec:
           mountPath: /var/log/validator-node
         - name: tmp
           mountPath: /tmp
+        - name: mcp-config-volume
+          mountPath: /etc/tripcodechain/mcp
+          readOnly: true
         readinessProbe:
           httpGet:
             path: /health
@@ -124,6 +131,9 @@ spec:
       - name: tmp
         emptyDir:
           sizeLimit: 500Mi
+      - name: mcp-config-volume
+        configMap:
+          name: mcp-config
       nodeSelector:
         kubernetes.io/os: linux
       tolerations:

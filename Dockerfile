@@ -32,9 +32,9 @@ RUN apk add --no-cache ca-certificates tzdata
 RUN adduser -D -s /bin/sh -u 1000 appuser
 
 # Crear directorios necesarios con permisos correctos
-RUN mkdir -p /data/blockchain /data/tx_chain /var/log/validator-node /tmp && \
-    chown -R appuser:appuser /data /var/log/validator-node /tmp && \
-    chmod -R 755 /data /var/log/validator-node && \
+RUN mkdir -p /data/blockchain /data/tx_chain /var/log/validator-node /tmp /etc/tripcodechain/mcp && \
+    chown -R appuser:appuser /data /var/log/validator-node /tmp /etc/tripcodechain && \
+    chmod -R 755 /data /var/log/validator-node /etc/tripcodechain && \
     chmod -R 1777 /tmp
 
 # Copiar binario

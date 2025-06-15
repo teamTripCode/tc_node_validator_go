@@ -62,6 +62,22 @@ API de gestión y monitoreo funcional
 
 ---
 
+## 🧠 Model Context Protocol (MCP) Integration
+
+TripCodeChain integrates the Model Context Protocol (MCP) to facilitate decentralized access to and aggregation of information from Large Language Models (LLMs) or other information sources distributed across the network.
+
+-   **Purpose**: MCP enables nodes to query other participating nodes for context or model-generated responses. This allows for richer data inputs into smart contracts or other on-chain/off-chain processes.
+-   **Decentralized LLM Access**: Each validator node can run its own MCP server (integrated as a Go library within the validator node software), making its information or model accessible to others via MCP.
+-   **Distributed LLM Service**: A core component, the Distributed LLM Service, is responsible for sending out queries to multiple MCP servers simultaneously. It aggregates the responses based on configurable strategies (e.g., first valid response, majority consensus).
+-   **P2P Communication**: MCP messages (queries and responses) are transported over the existing P2P network infrastructure, ensuring secure and direct node-to-node communication.
+-   **On-Chain Logging (Optional)**: To maintain transparency and auditability of significant MCP interactions (like those that might trigger critical on-chain actions), the system supports logging MCP activities. This is done via a special transaction type, `LogMCPActivityTransaction`, recorded on the DPoS (Transaction) chain. This provides an immutable record of query initiations and aggregated response hashes.
+
+The MCP and Distributed LLM Service components extend the capabilities of the TripCodeChain network beyond simple transactions and critical process logging, enabling more complex, data-driven decentralized applications.
+
+*(Note: The architecture overview/diagram should be updated to visually include the MCP servers, the Distributed LLM Service, and their interactions with the P2P network and the DPoS chain.)*
+
+---
+
 ## 🧩 Tecnologías Utilizadas
 
 **Núcleo del Sistema:**

@@ -482,8 +482,19 @@ func (d *DPoS) ValidateBlock(block *blockchain.Block) bool {
 
 	// Validate block hash
 	if block.Hash != block.CalculateHash() {
-		utils.LogError("Block hash is invalid")
+		utils.LogError("Block hash is invalid for block %d by %s", block.Index, block.Validator)
 		return false
+	}
+
+	// Validate all transactions within the block
+	for i, tx := range block.Transactions {
+		if err := tx.Validate(); err != nil {
+			utils.LogError("Transaction %d in block %d (validator: %s) failed validation: %v", i, block.Index, block.Validator, err)
+			return false
+		}
+	}
+	if len(block.Transactions) > 0 {
+		utils.LogDebug("All %d transactions in block %d validated successfully.", len(block.Transactions), block.Index)
 	}
 
 	return true

@@ -480,14 +480,38 @@ func (s *Server) TransactionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Set timestamp if not provided
-	if tx.Timestamp == "" {
-		tx.Timestamp = time.Now().UTC().Format(time.RFC3339)
+	// Set timestamp if not provided by the client; also ensure hash is calculated.
+	if tx.Timestamp == 0 {
+		tx.Timestamp = time.Now().Unix()
+		// If timestamp changes, hash might need recalculation if client was supposed to send it.
+		// However, for new transactions, ProcessID might be empty and Hash should be calculated by the node.
+	}
+
+	// Ensure ProcessID is set if it's used as a temporary ID before hashing or for other references.
+	// If Hash is the sole ID, ensure it's calculated.
+	if tx.Hash == "" {
+		newHash, err := tx.CalculateHash()
+		if err != nil {
+			utils.LogError("Error calculating hash for transaction: %v", err)
+			http.Error(w, "Error processing transaction: failed to calculate hash", http.StatusInternalServerError)
+			return
+		}
+		tx.Hash = newHash
+		if tx.ProcessID == "" { // If ProcessID was also empty, can set it to hash or part of it.
+			tx.ProcessID = tx.Hash
+		}
+	}
+
+	// Validate the transaction
+	if err := tx.Validate(); err != nil {
+		utils.LogError("Transaction validation failed: %v", err)
+		http.Error(w, fmt.Sprintf("Transaction validation failed: %s", err.Error()), http.StatusBadRequest)
+		return
 	}
 
 	// Add to mempool
 	s.TxMempool.AddItem(&tx)
-	utils.LogInfo("Transaction added to mempool: %s", tx.ProcessID)
+	utils.LogInfo("Transaction added to mempool: %s (Hash: %s)", tx.ProcessID, tx.Hash)
 
 	// Broadcast to other nodes
 	go s.BroadcastTransaction(&tx)
@@ -505,16 +529,37 @@ func (s *Server) BatchTransactionHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	for _, tx := range txs {
-		// Set timestamp if not provided
-		if tx.Timestamp == "" {
-			tx.Timestamp = time.Now().UTC().Format(time.RFC3339)
+		// Set timestamp if not provided by the client
+		if tx.Timestamp == 0 {
+			tx.Timestamp = time.Now().Unix()
+		}
+
+		// Ensure ProcessID and Hash are set
+		if tx.Hash == "" {
+			newHash, err := tx.CalculateHash()
+			if err != nil {
+				utils.LogError("Error calculating hash for batch transaction: %v", err)
+				// Decide if to skip this tx or fail batch. For now, skip.
+				continue
+			}
+			tx.Hash = newHash
+			if tx.ProcessID == "" {
+				tx.ProcessID = tx.Hash
+			}
+		}
+
+		// Validate the transaction
+		if err := tx.Validate(); err != nil {
+			utils.LogError("Batch transaction validation failed for tx %s: %v. Skipping.", tx.Hash, err)
+			// Decide if to skip this tx or fail batch. For now, skip.
+			continue
 		}
 
 		// Add to mempool
 		s.TxMempool.AddItem(tx)
 	}
 
-	utils.LogInfo("Added %d transactions to mempool", len(txs))
+	utils.LogInfo("Processed batch of %d transactions for mempool", len(txs))
 	w.WriteHeader(http.StatusCreated)
 }
 

@@ -1,0 +1,8 @@
+package p2p
+
+// MCPResponseProcessor defines the interface for processing incoming MCP responses.
+// This interface is typically implemented by a higher-level service (e.g., LLMService)
+// and used by the P2P server to decouple message handling.
+type MCPResponseProcessor interface {
+	ProcessIncomingResponse(response *MCPResponse)
+}

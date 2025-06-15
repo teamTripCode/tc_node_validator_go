@@ -11,6 +11,7 @@ import (
 
 	"tripcodechain_go/blockchain"
 	"tripcodechain_go/consensus"
+	"tripcodechain_go/llm" // Added for DistributedLLMService
 	"tripcodechain_go/mempool"
 	"tripcodechain_go/p2p"
 	"tripcodechain_go/utils"
@@ -100,18 +101,49 @@ func main() {
 	utils.LogInfo("Mempools initialized - Transactions: %d, Processes: %d",
 		txMempool.GetSize(), criticalMempool.GetSize())
 
-	// Configure and start server
-	server := p2p.NewServer(node, txChain, criticalChain, txMempool, criticalMempool)
+	// --- LLM Service and P2P Server Initialization ---
+	// --- LLM Service and P2P Server Initialization ---
+	// 1. Create P2P server instance.
+	// The MCPResponseProcessor (llmService) is set to nil initially
+	// as llmService itself needs the p2pServer (as P2PBroadcaster).
+	p2pServer := p2p.NewServer(node, txChain, criticalChain, txMempool, criticalMempool, nil)
+
+	// 2. Create DistributedLLMService. p2pServer implements llm.P2PBroadcaster.
+	// NewDistributedLLMService now only takes P2PBroadcaster.
+	llmService := llm.NewDistributedLLMService(p2pServer)
+
+	// 3. Set the LLMService (which is an MCPResponseProcessor) on the p2pServer.
+	p2pServer.LLMService = llmService
+
+	// 4. Create LLMAPIHandler
+	llmAPIHandler := llm.NewLLMAPIHandler(llmService)
+
+	// 5. Setup P2P routes
+	p2pServer.SetupRoutes()
+
+	// 6. Register LLM API routes directly using the p2pServer's router
+	if llmAPIHandler != nil && p2pServer.Router != nil {
+		p2pServer.Router.HandleFunc("/api/v1/llm/query", llmAPIHandler.HandleQuery).Methods("POST")
+		utils.LogInfo("LLM API route /api/v1/llm/query registered via main.")
+	} else {
+		if llmAPIHandler == nil {
+			utils.LogError("LLMAPIHandler is nil, LLM routes not registered.")
+		}
+		if p2pServer.Router == nil { // Should not happen if NewServer initializes Router
+			utils.LogError("P2P Server Router is nil, LLM routes not registered.")
+		}
+	}
+	// --- End LLM Service and P2P Server Initialization ---
 
 	// Start background processes
-	server.StartBackgroundProcessing()
+	p2pServer.StartBackgroundProcessing()
 	utils.LogInfo("Background processing started")
 
 	// Sincronización inicial
-	server.SyncChains()
+	p2pServer.SyncChains()
 
 	// Actualizar validadores desde contrato
-	go updateValidatorsPeriodically(server)
+	go updateValidatorsPeriodically(p2pServer)
 
 	// Start node monitoring
 	go node.StartHeartbeat()
@@ -129,7 +161,7 @@ func main() {
 
 	// Start server (blocking)
 	utils.LogInfo("Starting server on port %d...", *portFlag)
-	server.Start()
+	p2pServer.Start()
 }
 
 func setupGracefulShutdown() {
