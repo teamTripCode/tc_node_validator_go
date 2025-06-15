@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: validator-node-config
+  namespace: dpos-network
+  labels:
+    app: validator-node
+    version: v1.0.0
+data:
+  NODE_ENV: "production"
+  CHAIN_ID: "tripcodechain-mainnet"
+  DPoS_BLOCK_TIME: "3s"
+  DPoS_MIN_STAKE: "100000000000000000000"
+  DPoS_MAX_DELEGATES: "21"
+  LOG_LEVEL: "info"
+  P2P_BASE_PORT: "3001"
+  API_BASE_PORT: "3002"
+  SEED_NODES: "192.168.49.2:3000"
+  PEER_NODES: "validator-node-0.validator-node.dpos-network.svc.cluster.local:3001,validator-node-1.validator-node.dpos-network.svc.cluster.local:3001,validator-node-2.validator-node.dpos-network.svc.cluster.local:3001"
+  HEALTH_CHECK_PORT: "3002"
+  METRICS_PORT: "9090"

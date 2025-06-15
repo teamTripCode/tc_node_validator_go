@@ -1,0 +1,45 @@
+# Servicio para conectar al nodo semilla en localhost
+apiVersion: v1
+kind: Service
+metadata:
+  name: seed-node-external
+  namespace: dpos-network
+  labels:
+    app: seed-node
+    service-type: external
+spec:
+  type: ExternalName
+  externalName: host.minikube.internal
+  ports:
+  - protocol: TCP
+    port: 3000
+    targetPort: 3000
+---
+# Alternativa: Endpoint manual si ExternalName no funciona
+apiVersion: v1
+kind: Service
+metadata:
+  name: seed-node-manual
+  namespace: dpos-network
+  labels:
+    app: seed-node
+    service-type: manual
+spec:
+  ports:
+  - protocol: TCP
+    port: 3000
+    targetPort: 3000
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: seed-node-manual
+  namespace: dpos-network
+  labels:
+    app: seed-node
+subsets:
+- addresses:
+  - ip: "192.168.49.2"
+  ports:
+  - port: 3000
+    protocol: TCP

@@ -1,2 +1,8 @@
 /data
 /.env*
+
+# NO ignorar estos archivos importantes
+!go.mod
+!go.sum
+!*.go
+!Dockerfile

@@ -1,0 +1,63 @@
+# Servicio headless para StatefulSet
+apiVersion: v1
+kind: Service
+metadata:
+  name: validator-node
+  namespace: dpos-network
+  labels:
+    app: validator-node
+spec:
+  clusterIP: None
+  selector:
+    app: validator-node
+  ports:
+  - name: p2p
+    port: 3001
+    targetPort: 3001
+  - name: api
+    port: 3002
+    targetPort: 3002
+---
+# Servicio externo para acceso desde fuera del cluster
+apiVersion: v1
+kind: Service
+metadata:
+  name: validator-node-external
+  namespace: dpos-network
+  labels:
+    app: validator-node
+    service-type: external
+spec:
+  type: NodePort
+  selector:
+    app: validator-node
+  ports:
+  - name: api-0
+    port: 4001
+    targetPort: 3002
+    nodePort: 30001
+  - name: api-1
+    port: 4002
+    targetPort: 3002
+    nodePort: 30002
+  - name: api-2
+    port: 4003
+    targetPort: 3002
+    nodePort: 30003
+---
+# Servicio para métricas
+apiVersion: v1
+kind: Service
+metadata:
+  name: validator-node-metrics
+  namespace: dpos-network
+  labels:
+    app: validator-node
+    metrics: enabled
+spec:
+  selector:
+    app: validator-node
+  ports:
+  - name: metrics
+    port: 9090
+    targetPort: 9090

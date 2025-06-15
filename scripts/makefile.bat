@@ -2,7 +2,7 @@
 setlocal EnableDelayedExpansion
 
 REM ============================================================================
-REM TripCode Blockchain - Deployment Script Completo 2025
+REM TripCode Blockchain - Deployment Script
 REM Genera TODOS los archivos YAML necesarios automáticamente
 REM ============================================================================
 
@@ -15,7 +15,7 @@ set IMAGE_TAG=latest
 set NAMESPACE=dpos-network
 set TIMEOUT=600s
 set HEALTH_CHECK_RETRIES=30
-set K8S_DIR=k8s
+set K8S_DIR=../k8s
 
 REM Crear directorio k8s si no existe
 if not exist "%K8S_DIR%" mkdir "%K8S_DIR%"
@@ -289,7 +289,7 @@ echo         - secretRef:
 echo             name: validator-node-secrets
 echo         volumeMounts:
 echo         - name: blockchain-data
-echo           mountPath: /data/blockchain
+echo           mountPath: /data
 echo         - name: logs
 echo           mountPath: /var/log/validator-node
 echo         - name: tmp
@@ -334,6 +334,9 @@ echo             ephemeral-storage: "2Gi"
 echo         securityContext:
 echo           allowPrivilegeEscalation: false
 echo           readOnlyRootFilesystem: false
+echo           runAsNonRoot: true
+echo           runAsUser: 1000
+echo           runAsGroup: 1000
 echo           capabilities:
 echo             drop:
 echo             - ALL
@@ -492,11 +495,19 @@ exit /b 0
 
 :build_and_push_image
 echo    🏗️  Construyendo imagen optimizada...
+
+REM Cambiar al directorio padre donde están go.mod, go.sum y el código fuente
+cd ..
+
+REM Construir desde el directorio raíz del proyecto
 docker build ^
     --cache-from %IMAGE_NAME%:%IMAGE_TAG% ^
     --build-arg BUILDKIT_INLINE_CACHE=1 ^
     -t %IMAGE_NAME%:%IMAGE_TAG% ^
-    -f ../Dockerfile ../
+    .
+
+REM Volver al directorio scripts
+cd scripts
 
 if errorlevel 1 (
     echo ❌ Error al construir la imagen

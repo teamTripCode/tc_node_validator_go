@@ -5,15 +5,15 @@ FROM golang:1.24-alpine AS builder
 RUN apk add --no-cache git ca-certificates tzdata
 
 # Crear usuario no-root
-RUN adduser -D -s /bin/sh -u 1001 appuser
+RUN adduser -D -s /bin/sh -u 1000 appuser
 
 WORKDIR /app
 
-# Copiar archivos de dependencias primero para mejor cache
+# Copiar archivos de módulos Go primero (para aprovechar cache de Docker)
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copiar código fuente
+# Copiar todo el código fuente
 COPY . .
 
 # Build con optimizaciones
@@ -22,26 +22,32 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -a -installsuffix cgo \
     -o /dpos-node .
 
-# Final stage
-FROM gcr.io/distroless/static-debian12
+# Final stage - Cambiar a imagen base que permita escritura
+FROM alpine:3.19
 
-# Copiar usuario desde builder
-COPY --from=builder /etc/passwd /etc/passwd
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+# Instalar dependencias mínimas
+RUN apk add --no-cache ca-certificates tzdata
+
+# Crear usuario no-root con el mismo UID que el StatefulSet
+RUN adduser -D -s /bin/sh -u 1000 appuser
+
+# Crear directorios necesarios con permisos correctos
+RUN mkdir -p /data/blockchain /data/tx_chain /var/log/validator-node /tmp && \
+    chown -R appuser:appuser /data /var/log/validator-node /tmp && \
+    chmod -R 755 /data /var/log/validator-node && \
+    chmod -R 1777 /tmp
 
 # Copiar binario
-COPY --from=builder /dpos-node /dpos-node
+COPY --from=builder /dpos-node /usr/local/bin/dpos-node
 
 # Cambiar a usuario no-root
 USER appuser
 
-# Exponer puerto
-EXPOSE 3001
+WORKDIR /data
 
-# Health check
+EXPOSE 3001 3002 9090
+
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD ["/dpos-node", "--health-check"] || exit 1
+    CMD ["/usr/local/bin/dpos-node", "--health-check"] || exit 1
 
-# Comando por defecto
-CMD ["/dpos-node"]
+CMD ["/usr/local/bin/dpos-node"]

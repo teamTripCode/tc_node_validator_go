@@ -1,0 +1,61 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: validator-node-network-policy
+  namespace: dpos-network
+  labels:
+    app: validator-node
+spec:
+  podSelector:
+    matchLabels:
+      app: validator-node
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Permitir comunicación P2P entre nodos validadores
+  - from:
+    - podSelector:
+        matchLabels:
+          app: validator-node
+    ports:
+    - protocol: TCP
+      port: 3001
+    - protocol: TCP
+      port: 3002
+  # Permitir acceso API externo
+  - ports:
+    - protocol: TCP
+      port: 3002
+  # Permitir acceso a métricas
+  - ports:
+    - protocol: TCP
+      port: 9090
+  egress:
+  # Permitir comunicación entre nodos validadores
+  - to:
+    - podSelector:
+        matchLabels:
+          app: validator-node
+    ports:
+    - protocol: TCP
+      port: 3001
+    - protocol: TCP
+      port: 3002
+  # Permitir DNS
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  # Permitir conexión al seed node
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 3000
+  # Permitir HTTPS para registry
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
