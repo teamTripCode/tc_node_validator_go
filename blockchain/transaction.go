@@ -6,8 +6,44 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time" // Added for NewTransaction helper
+	"strconv" // Added for FlexTimestamp
+	"strings" // Added for FlexTimestamp
+	"time"    // Added for NewTransaction helper
 )
+
+// FlexTimestamp is a type that can unmarshal an int64 or a string representing an int64 from JSON.
+type FlexTimestamp int64
+
+// UnmarshalJSON implements the json.Unmarshaler interface.
+func (ft *FlexTimestamp) UnmarshalJSON(data []byte) error {
+	// Try to unmarshal as an int64 directly.
+	var i int64
+	if err := json.Unmarshal(data, &i); err == nil {
+		*ft = FlexTimestamp(i)
+		return nil
+	}
+
+	// If direct unmarshalling fails, try to unmarshal as a string and convert.
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return fmt.Errorf("timestamp is not a valid string or integer: %v", err)
+	}
+
+	// Remove quotes if present (json.Unmarshal to string sometimes keeps them)
+	s = strings.Trim(s, "\"")
+
+	parsedInt, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return fmt.Errorf("failed to parse timestamp string to int64: %v", err)
+	}
+	*ft = FlexTimestamp(parsedInt)
+	return nil
+}
+
+// MarshalJSON implements the json.Marshaler interface to ensure it's always marshalled as an int64.
+func (ft FlexTimestamp) MarshalJSON() ([]byte, error) {
+	return json.Marshal(int64(ft))
+}
 
 // Transaction types
 const (
@@ -53,7 +89,7 @@ type Transaction struct {
 	Type        string          `json:"type"`                // Type of the transaction (e.g., TxTransfer, TxLogMCPActivity)
 	Description string          `json:"description,omitempty"`
 	Data        json.RawMessage `json:"data"`                // Holds specific data based on Type
-	Timestamp   int64           `json:"timestamp"`           // Unix timestamp
+	Timestamp   FlexTimestamp   `json:"timestamp"`           // Unix timestamp
 	Signature   string          `json:"signature,omitempty"` // Signature of the transaction hash
 	GasLimit    uint64          `json:"gasLimit"`
 	// Nonce      uint64          `json:"nonce"` // Often included for replay protection
@@ -68,7 +104,7 @@ func (t *Transaction) CalculateHash() (string, error) {
 		Type        string          `json:"type"`
 		Description string          `json:"description,omitempty"`
 		Data        json.RawMessage `json:"data"`
-		Timestamp   int64           `json:"timestamp"`
+		Timestamp   FlexTimestamp   `json:"timestamp"` // Changed to FlexTimestamp
 		GasLimit    uint64          `json:"gasLimit"`
 		ProcessID   string          `json:"processId,omitempty"` // Include if still relevant for identity before hashing
 		// Add Nonce here if it's part of the hashable content
@@ -105,7 +141,7 @@ func (t *Transaction) Validate() error {
 	// 	return fmt.Errorf("transaction hash mismatch: provided %s, calculated %s", t.Hash, currentHash)
 	// }
 
-	if t.Timestamp <= 0 { // Timestamps should be positive
+	if t.Timestamp <= FlexTimestamp(0) { // Timestamps should be positive // <--- MODIFIED HERE
 		return errors.New("transaction timestamp is invalid")
 	}
 	if t.Type == "" {
@@ -202,12 +238,12 @@ func (t *Transaction) GetID() string {
 // GetTimestamp returns the timestamp of a transaction as a string.
 // This is to satisfy the MempoolItem interface.
 func (t *Transaction) GetTimestamp() string {
-	return fmt.Sprintf("%d", t.Timestamp)
+	return fmt.Sprintf("%d", int64(t.Timestamp)) // <--- MODIFIED HERE
 }
 
 // GetRawTimestamp returns the raw int64 timestamp.
 func (t *Transaction) GetRawTimestamp() int64 {
-	return t.Timestamp
+	return int64(t.Timestamp) // <--- MODIFIED HERE
 }
 
 // GetID returns the process ID of a critical process.
@@ -228,7 +264,7 @@ func NewTransaction(txType string, data json.RawMessage, gasLimit uint64, descri
 	tx := &Transaction{
 		Type:        txType,
 		Data:        data,
-		Timestamp:   ts,
+		Timestamp:   FlexTimestamp(ts), // <--- MODIFIED HERE
 		GasLimit:    gasLimit,
 		Description: description,
 	}
