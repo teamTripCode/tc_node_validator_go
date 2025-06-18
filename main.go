@@ -197,7 +197,7 @@ func updateValidatorsPeriodically(s *p2p.Server) {
 }
 
 // getCurrentValidators retrieves the current validators from the transaction chain.
-func getCurrentValidators(txChain *blockchain.Blockchain) ([]string, error) {
+func getCurrentValidators(_ *blockchain.Blockchain) ([]string, error) {
 	// Placeholder implementation: Replace with actual logic to fetch validators.
 	// For example, this could involve querying a smart contract or reading from the blockchain state.
 	return []string{"validator1", "validator2", "validator3"}, nil

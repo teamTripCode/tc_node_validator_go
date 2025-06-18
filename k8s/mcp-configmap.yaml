@@ -1,22 +1,35 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: mcp-config # This name must match the one referenced in the StatefulSet
-  namespace: dpos-network # Ensure this matches the namespace of your StatefulSet
+  name: mcp-config
+  namespace: dpos-network
+  labels:
+    app: validator-node
+    component: mcp
 data:
-  # config.json is the key that will be mounted as a file in /etc/tripcodechain/mcp/config.json
   config.json: |
     {
       "mcpServiceEnabled": true,
-      "defaultQueryTimeoutSeconds": 10,
-      "maxConcurrentQueriesPerNode": 5,
+      "defaultQueryTimeoutSeconds": 30,
+      "maxConcurrentQueriesPerNode": 10,
       "logLevel": "INFO",
       "llmService": {
+        "enabled": true,
+        "provider": "openai",
+        "model": "gpt-3.5-turbo",
+        "maxTokens": 1000,
+        "temperature": 0.7,
         "minResponsesForAggregation": 1,
-        "responseAggregationStrategy": "firstValid"
+        "responseAggregationStrategy": "firstValid",
+        "timeoutSeconds": 30
       },
-      "nodeBlacklist": [
-        "node-id-to-blacklist-1",
-        "node-id-to-blacklist-2"
-      ]
+      "nodeBlacklist": [],
+      "healthCheck": {
+        "enabled": true,
+        "intervalSeconds": 60
+      },
+      "metrics": {
+        "enabled": true,
+        "port": 9091
+      }
     }
