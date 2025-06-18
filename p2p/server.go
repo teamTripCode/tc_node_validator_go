@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"tripcodechain_go/blockchain"
-	// "tripcodechain_go/llm" // Removed to break import cycle
+	"tripcodechain_go/llm" // Added for LocalLLMClient
 	"tripcodechain_go/mempool"
 	"tripcodechain_go/utils"
 
@@ -25,11 +25,13 @@ type Server struct {
 	CriticalMempool *mempool.Mempool
 	NodeMgr         *NodeManager         // Added NodeManager
 	LLMService      MCPResponseProcessor // Changed to interface
+	localLLM        llm.LocalLLMClient   // Added for local LLM processing
 }
 
 // NewServer creates a new server instance
 func NewServer(node *Node, txChain *blockchain.Blockchain, criticalChain *blockchain.Blockchain,
-	txMempool *mempool.Mempool, criticalMempool *mempool.Mempool, llmService MCPResponseProcessor) *Server {
+	txMempool *mempool.Mempool, criticalMempool *mempool.Mempool,
+	llmService MCPResponseProcessor, localLLMClient llm.LocalLLMClient) *Server { // Added localLLMClient
 
 	server := &Server{
 		Router:          mux.NewRouter(),
@@ -39,7 +41,8 @@ func NewServer(node *Node, txChain *blockchain.Blockchain, criticalChain *blockc
 		CriticalChain:   criticalChain,
 		TxMempool:       txMempool,
 		CriticalMempool: criticalMempool,
-		LLMService:      llmService, // LLMService (MCPResponseProcessor) is set here
+		LLMService:      llmService,     // LLMService (MCPResponseProcessor) is set here
+		localLLM:        localLLMClient, // Initialize localLLM
 	}
 
 	// server.setupRoutes() // setupRoutes will be called from main after LLMAPIHandler is created
@@ -173,11 +176,42 @@ func (s *Server) HandleMCPQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Lógica de procesamiento de la consulta (placeholder)
-	// ...
+	if s.localLLM != nil {
+		llmResponsePayload, err := s.localLLM.QueryLLM(query.Payload)
+		if err != nil {
+			utils.LogError("Failed to process MCPQuery %s with local LLM: %v", query.QueryID, err)
+			// Still send HTTP OK because the query was received, but no MCPResponse will be sent.
+		} else {
+			utils.LogInfo("MCPQuery %s processed successfully by local LLM.", query.QueryID)
+
+			// Construct MCPResponse
+			mcpResponse := &MCPResponse{
+				QueryID:         query.QueryID,
+				Timestamp:       time.Now().Unix(),
+				OriginNodeID:    query.OriginNodeID,    // This should be the original querier
+				ResponderNodeID: s.Node.ID,             // This node is responding
+				Payload:         llmResponsePayload,
+				// Signature would be calculated here if implemented
+				// Signature: s.Node.SignData(mcpResponse.SignableData()) // Placeholder for signing
+			}
+
+			// For now, log the response instead of sending it back via P2P
+			responseJSON, _ := json.Marshal(mcpResponse) // Error handling omitted for brevity in log
+			utils.LogInfo("MCPResponse prepared for QueryID %s: %s", query.QueryID, string(responseJSON))
+
+			// TODO: Implement actual P2P sending of MCPResponse to query.OriginNodeID
+			// Example: err := s.SendMCPResponse(query.OriginNodeID, mcpResponse)
+			// if err != nil {
+			//    utils.LogError("Failed to send MCPResponse for QueryID %s to %s: %v", query.QueryID, query.OriginNodeID, err)
+			// }
+		}
+	} else {
+		utils.LogInfo("Local LLM client not configured, MCPQuery %s cannot be processed locally.", query.QueryID)
+	}
 
 	w.WriteHeader(http.StatusOK)
 	// Respond with a simple confirmation message or the processed data
-	if _, err := w.Write([]byte("MCPQuery recibido con éxito")); err != nil {
+	if _, err := w.Write([]byte("MCPQuery recibido con éxito")); err != nil { //TODO: Consider if response should change based on LLM outcome
 		utils.LogError("Error escribiendo respuesta para MCPQuery: %v", err)
 	}
 }
