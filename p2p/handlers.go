@@ -482,7 +482,7 @@ func (s *Server) TransactionHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Set timestamp if not provided by the client; also ensure hash is calculated.
 	if tx.Timestamp == 0 {
-		tx.Timestamp = time.Now().Unix()
+		tx.Timestamp = blockchain.FlexTimestamp(time.Now().Unix())
 		// If timestamp changes, hash might need recalculation if client was supposed to send it.
 		// However, for new transactions, ProcessID might be empty and Hash should be calculated by the node.
 	}
@@ -531,7 +531,7 @@ func (s *Server) BatchTransactionHandler(w http.ResponseWriter, r *http.Request)
 	for _, tx := range txs {
 		// Set timestamp if not provided by the client
 		if tx.Timestamp == 0 {
-			tx.Timestamp = time.Now().Unix()
+			tx.Timestamp = blockchain.FlexTimestamp(time.Now().Unix())
 		}
 
 		// Ensure ProcessID and Hash are set
