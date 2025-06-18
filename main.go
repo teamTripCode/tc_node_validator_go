@@ -101,15 +101,29 @@ func main() {
 	utils.LogInfo("Mempools initialized - Transactions: %d, Processes: %d",
 		txMempool.GetSize(), criticalMempool.GetSize())
 
-	// --- LLM Service and P2P Server Initialization ---
+	// Load LLM Configuration
+	llmConfig, err := llm.LoadLLMConfig("llm/config.json") // Or pass "" to use default path in LoadLLMConfig
+	if err != nil {
+		log.Fatalf("FATAL: Failed to load LLM configuration: %v", err)
+	}
+
+	// Create Local LLM Client
+	localLLMClient := llm.NewLocalLLMClient(llmConfig)
+	if localLLMClient == nil {
+		// NewLocalLLMClient might not return nil based on current implementation,
+		// but good practice to check if it could.
+		// If NewLocalLLMClient logs and returns a non-nil client even on error,
+		// this check might be redundant or need adjustment based on NewLocalLLMClient's behavior.
+		log.Fatalf("FATAL: Failed to create LocalLLMClient.")
+	}
+
 	// --- LLM Service and P2P Server Initialization ---
 	// 1. Create P2P server instance.
-	// The MCPResponseProcessor (llmService) is set to nil initially
-	// as llmService itself needs the p2pServer (as P2PBroadcaster).
-	p2pServer := p2p.NewServer(node, txChain, criticalChain, txMempool, criticalMempool, nil)
+	// The MCPResponseProcessor (llmService) is set to nil initially.
+	// localLLMClient is passed as the LocalLLMProcessor.
+	p2pServer := p2p.NewServer(node, txChain, criticalChain, txMempool, criticalMempool, nil, localLLMClient)
 
 	// 2. Create DistributedLLMService. p2pServer implements llm.P2PBroadcaster.
-	// NewDistributedLLMService now only takes P2PBroadcaster.
 	llmService := llm.NewDistributedLLMService(p2pServer)
 
 	// 3. Set the LLMService (which is an MCPResponseProcessor) on the p2pServer.
