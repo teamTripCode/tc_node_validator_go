@@ -6,3 +6,9 @@ package p2p
 type MCPResponseProcessor interface {
 	ProcessIncomingResponse(response *MCPResponse)
 }
+
+// LocalLLMProcessor defines the interface for local LLM query processing.
+// This allows the p2p server to use a local LLM without directly depending on the llm package.
+type LocalLLMProcessor interface {
+	QueryLLM(payload []byte) ([]byte, error)
+}

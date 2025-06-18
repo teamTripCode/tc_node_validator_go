@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"tripcodechain_go/blockchain"
-	"tripcodechain_go/llm" // Added for LocalLLMClient
+	// "tripcodechain_go/llm" // Removed as LocalLLMClient is replaced by LocalLLMProcessor interface
 	"tripcodechain_go/mempool"
 	"tripcodechain_go/utils"
 
@@ -25,13 +25,13 @@ type Server struct {
 	CriticalMempool *mempool.Mempool
 	NodeMgr         *NodeManager         // Added NodeManager
 	LLMService      MCPResponseProcessor // Changed to interface
-	localLLM        llm.LocalLLMClient   // Added for local LLM processing
+	localLLM        LocalLLMProcessor    // Changed to interface
 }
 
 // NewServer creates a new server instance
 func NewServer(node *Node, txChain *blockchain.Blockchain, criticalChain *blockchain.Blockchain,
 	txMempool *mempool.Mempool, criticalMempool *mempool.Mempool,
-	llmService MCPResponseProcessor, localLLMClient llm.LocalLLMClient) *Server { // Added localLLMClient
+	llmService MCPResponseProcessor, localLLMClient LocalLLMProcessor) *Server { // Changed parameter type
 
 	server := &Server{
 		Router:          mux.NewRouter(),
