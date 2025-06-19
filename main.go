@@ -22,7 +22,8 @@ func main() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
 	log.SetOutput(os.Stdout)
 
-	seedNodes := flag.String("seed", "", "Comma-separated list of seed nodes")
+	// Define command line flags
+	seedNodesFlag := flag.String("seed", "", "Comma-separated list of seed nodes (fallback if SEED_NODES env var is not set)")
 	//	externalIP := flag.String("ip", "0.0.0.0", "External IP address for node")
 
 	// Parse command line flags
@@ -39,15 +40,31 @@ func main() {
 	node.NodeType = "validator"
 	utils.PrintStartupMessage(node.ID, *portFlag)
 
-	if *seedNodes != "" {
-		nodes := strings.SplitSeq(*seedNodes, ",")
-		for n := range nodes {
-			node.AddNode(n)
-			// Registrar este nodo en el semilla
-			go func(seed string) {
-				node.RegisterWithNode(seed)
-			}(n)
+	// Determine seed nodes: prioritize environment variable, then flag
+	var seedNodesStr string
+	var seedNodesSource string
+
+	envSeedNodes := os.Getenv("SEED_NODES")
+	if envSeedNodes != "" {
+		seedNodesStr = envSeedNodes
+		seedNodesSource = "environment variable SEED_NODES"
+	} else {
+		seedNodesStr = *seedNodesFlag
+		seedNodesSource = "command-line flag -seed"
+	}
+
+	if seedNodesStr != "" {
+		utils.LogInfo("Loading seed nodes from %s: %s", seedNodesSource, seedNodesStr)
+		seeds := strings.Split(seedNodesStr, ",")
+		for _, seed := range seeds {
+			trimmedSeed := strings.TrimSpace(seed)
+			if trimmedSeed != "" {
+				node.AddNode(trimmedSeed) // AddNode should handle if it's already known or self
+				go node.RegisterWithNode(trimmedSeed)
+			}
 		}
+	} else {
+		utils.LogInfo("No seed nodes provided via environment variable or command-line flag.")
 	}
 
 	// Create data directories
@@ -191,13 +208,20 @@ func setupGracefulShutdown() {
 }
 
 func updateValidatorsPeriodically(s *p2p.Server) {
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(5 * time.Minute) // Consider making this configurable or shorter for faster updates
 	for {
 		select {
 		case <-ticker.C:
-			validators, err := getCurrentValidators(s.TxChain)
+			// Pass s.Node instead of s.TxChain
+			validators, err := getCurrentValidators(s.Node)
 			if err == nil {
-				dpos := s.TxChain.GetConsensus().(*consensus.DPoS)
+				// Ensure Consensus is DPoS type if not already guaranteed by txChain setup
+				consensusModule := s.TxChain.GetConsensus()
+				dpos, ok := consensusModule.(*consensus.DPoS)
+				if !ok {
+					utils.LogError("Consensus module for TxChain is not DPoS, cannot update validators dynamically.")
+					continue
+				}
 				validatorInfos := make([]consensus.ValidatorInfo, len(validators))
 				for i, v := range validators {
 					validatorInfos[i] = consensus.ValidatorInfo{Address: v}
@@ -210,9 +234,33 @@ func updateValidatorsPeriodically(s *p2p.Server) {
 	}
 }
 
-// getCurrentValidators retrieves the current validators from the transaction chain.
-func getCurrentValidators(_ *blockchain.Blockchain) ([]string, error) {
-	// Placeholder implementation: Replace with actual logic to fetch validators.
-	// For example, this could involve querying a smart contract or reading from the blockchain state.
-	return []string{"validator1", "validator2", "validator3"}, nil
+// getCurrentValidators retrieves validator node addresses from the discovered peers.
+func getCurrentValidators(node *p2p.Node) ([]string, error) {
+	if node == nil {
+		return []string{}, fmt.Errorf("p2p.Node instance is nil")
+	}
+
+	// Use GetKnownNodeStatuses which returns []p2p.NodeStatus (values, not pointers)
+	// This provides a more comprehensive list of all known peers.
+	knownStatuses := node.GetKnownNodeStatuses()
+	if len(knownStatuses) == 0 {
+		utils.LogInfo("No known node statuses available to filter for validators.")
+		return []string{}, nil
+	}
+
+	var validatorAddresses []string
+	// Iterate over []p2p.NodeStatus. 'peer' is a p2p.NodeStatus value.
+	for _, peerStatus := range knownStatuses {
+		if peerStatus.NodeType == "validator" {
+			validatorAddresses = append(validatorAddresses, peerStatus.Address)
+		}
+	}
+
+	if len(validatorAddresses) == 0 {
+		utils.LogInfo("No nodes with NodeType 'validator' found among known node statuses.")
+	} else {
+		utils.LogInfo("Found %d validators: %v", len(validatorAddresses), validatorAddresses)
+	}
+
+	return validatorAddresses, nil
 }

@@ -88,47 +88,57 @@ type SeedNode struct {
 	nodeManager NodeManager
 }
 
-// GetNodesHandler returns the list of known nodes
-// This is the original GetNodesHandler, kept for now.
-// It might need to be updated or removed if it conflicts with GetActiveNodesHandler's purpose.
+// GetNodesHandler returns the list of known node statuses (address and type).
 func (s *Server) GetNodesHandler(w http.ResponseWriter, r *http.Request) {
-	nodes := s.Node.GetKnownNodes()
+	statuses := s.Node.GetKnownNodeStatuses() // This new method returns []NodeStatus
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(nodes)
+	if err := json.NewEncoder(w).Encode(statuses); err != nil {
+		utils.LogError("GetNodesHandler: Error encoding node statuses: %v", err)
+		http.Error(w, "Error encoding response", http.StatusInternalServerError)
+	}
 }
 
 // OriginalRegisterNodeHandler handles node registration requests for the Server struct.
-// Renamed to avoid conflict with the new RegisterNodeHandler that uses NodeManager.
+// It now expects a NodeRegistrationRequest containing Address and NodeType.
 func (s *Server) OriginalRegisterNodeHandler(w http.ResponseWriter, r *http.Request) {
-	var node string
-	if err := json.NewDecoder(r.Body).Decode(&node); err != nil {
-		http.Error(w, "Invalid node format", http.StatusBadRequest)
-		utils.LogError("Invalid node registration format: %v", err)
+	var reqBody NodeRegistrationRequest // Use p2p.NodeRegistrationRequest from node.go
+	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+		http.Error(w, "Invalid request body format for node registration: "+err.Error(), http.StatusBadRequest)
+		utils.LogError("OriginalRegisterNodeHandler: Invalid node registration format: %v", err)
 		return
 	}
 
 	// Validate node address format
-	if !isValidNodeAddress(node) {
-		http.Error(w, "Invalid node address format", http.StatusBadRequest)
-		utils.LogError("Invalid node address: %s", node)
+	if !isValidNodeAddress(reqBody.Address) {
+		http.Error(w, "Invalid node address format: "+reqBody.Address, http.StatusBadRequest)
+		utils.LogError("OriginalRegisterNodeHandler: Invalid node address: %s", reqBody.Address)
+		return
+	}
+
+	if reqBody.Address == s.Node.ID {
+		http.Error(w, "Cannot register self", http.StatusBadRequest)
+		utils.LogInfo("OriginalRegisterNodeHandler: Attempt to register self from %s", reqBody.Address)
 		return
 	}
 
 	// Check if node is responsive before adding
-	if isPingable(node) {
-		if s.Node.AddNode(node) {
-			utils.LogInfo("New node registered: %s", node)
-			w.WriteHeader(http.StatusCreated)
-		} else {
-			utils.LogInfo("Node already registered: %s", node)
-			w.WriteHeader(http.StatusOK)
-		}
+	if isPingable(reqBody.Address) {
+		// Use AddNodeStatus to store the node with its type
+		// AddNodeStatus itself handles the logic of whether it's new or an update and logs appropriately.
+		s.Node.AddNodeStatus(NodeStatus{Address: reqBody.Address, NodeType: reqBody.NodeType})
+
+		// It's tricky to know if AddNodeStatus resulted in a "new" vs "updated" without more return info from it.
+		// For simplicity, we can assume OK or Created. If AddNodeStatus were to return a boolean if new, we could use it.
+		// Let's assume registration implies the node is now known or updated.
+		w.WriteHeader(http.StatusOK) // Or http.StatusCreated if we knew it was new. Ok is safe.
+		utils.LogInfo("Node %s (type: %s) processed for registration.", reqBody.Address, reqBody.NodeType)
+
 
 		// Immediately sync with the new node
-		go s.syncWithNode(node)
+		go s.syncWithNode(reqBody.Address)
 	} else {
-		http.Error(w, "Node not reachable", http.StatusBadRequest)
-		utils.LogError("Failed to register unreachable node: %s", node)
+		http.Error(w, "Node not reachable: "+reqBody.Address, http.StatusBadRequest)
+		utils.LogError("OriginalRegisterNodeHandler: Failed to register unreachable node: %s", reqBody.Address)
 	}
 }
 
