@@ -24,9 +24,12 @@ type Node struct {
 	ID         string
 	NodeType   string
 	Port       int
-	KnownNodes []string
+	knownNodes map[string]NodeStatus // Changed from []string to map[string]NodeStatus
 	PrivateKey string
-	mutex      sync.Mutex
+	mutex      sync.Mutex            // Protects knownNodes
+
+	discoveredPeersWithStatus []*NodeStatus // For results from specific getNodePeers calls
+	discoveredPeersMutex      sync.Mutex      // Protects discoveredPeersWithStatus
 }
 
 type NodeRegistrationRequest struct {
@@ -44,10 +47,48 @@ func NewNode(port int) *Node {
 	nodeID := fmt.Sprintf("localhost:%d", port)
 	return &Node{
 		ID:         nodeID,
+		NodeType:   "unknown", // Default NodeType, will be set by caller or registration
 		Port:       port,
-		KnownNodes: []string{},
+		knownNodes: make(map[string]NodeStatus), // Initialize map
 		mutex:      sync.Mutex{},
+		// discoveredPeersWithStatus is initially nil, discoveredPeersMutex is zero value
 	}
+}
+
+// AddNodeStatus adds or updates a node's status in the knownNodes map.
+func (n *Node) AddNodeStatus(status NodeStatus) {
+	n.mutex.Lock()
+	defer n.mutex.Unlock()
+
+	if status.Address == n.ID { // Do not add self
+		return
+	}
+
+	existingStatus, exists := n.knownNodes[status.Address]
+	if exists {
+		// Update if different, especially NodeType
+		if existingStatus.NodeType != status.NodeType {
+			utils.LogInfo("Updating node status for %s: NodeType changed from %s to %s", status.Address, existingStatus.NodeType, status.NodeType)
+			n.knownNodes[status.Address] = status
+		} else {
+			utils.LogDebug("Node status for %s already up-to-date (NodeType: %s).", status.Address, status.NodeType)
+		}
+	} else {
+		utils.LogInfo("Adding new node with status: %s (NodeType: %s)", status.Address, status.NodeType)
+		n.knownNodes[status.Address] = status
+	}
+}
+
+// GetKnownNodeStatuses returns a slice of NodeStatus objects from the knownNodes map.
+func (n *Node) GetKnownNodeStatuses() []NodeStatus {
+	n.mutex.Lock()
+	defer n.mutex.Unlock()
+
+	statuses := make([]NodeStatus, 0, len(n.knownNodes))
+	for _, status := range n.knownNodes {
+		statuses = append(statuses, status)
+	}
+	return statuses
 }
 
 // StartHeartbeat sends regular status updates
@@ -99,23 +140,24 @@ func (n *Node) DiscoverNodes() {
 			continue
 		}
 
-		peers, err := n.getNodePeers(node)
+		// getNodePeers returns []*NodeStatus. We should use AddNodeStatus.
+		peersStatusList, err := n.getNodePeers(node)
 		if err != nil {
-			utils.LogError("Error obteniendo peers de %s: %v", node, err)
+			utils.LogError("Error getting peers from %s: %v", node, err)
 			continue
 		}
 
-		for _, peer := range peers {
-			if !utils.Contains(n.KnownNodes, peer) && peer != n.ID {
-				n.AddNode(peer)
-				utils.LogInfo("Nodo descubierto: %s", peer)
+		for _, peerStatus := range peersStatusList {
+			if peerStatus.Address != n.ID { // Don't add self
+				// AddNodeStatus handles logging and deciding if it's new or an update
+				n.AddNodeStatus(*peerStatus)
 			}
 		}
 	}
 }
 
 // En getNodePeers
-func (n *Node) getNodePeers(node string) ([]string, error) {
+func (n *Node) getNodePeers(node string) ([]*NodeStatus, error) {
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(fmt.Sprintf("http://%s/nodes", node))
 	if err != nil {
@@ -127,75 +169,137 @@ func (n *Node) getNodePeers(node string) ([]string, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&peers); err != nil {
 		return nil, err
 	}
-
-	// Extraer solo las direcciones
-	var addresses []string
-	for _, p := range peers {
-		addresses = append(addresses, p.Address)
-	}
-	return addresses, nil
+	return peers, nil
 }
 
-func (n *Node) RegisterWithNode(node string) {
-	// Crea el cuerpo de la solicitud
-	reqBody := NodeRegistrationRequest{
-		Address:  n.ID,       // Ej: "localhost:3001"
-		NodeType: n.NodeType, // Ej: "validator"
+func (n *Node) RegisterWithNode(seedNodeAddress string) {
+	maxRetries := 5
+	baseBackoff := 5 * time.Second
+
+	// Revert payload to NodeRegistrationRequest
+	regRequestBody := NodeRegistrationRequest{
+		Address:  n.ID,
+		NodeType: n.NodeType,
 	}
-	bodyBytes, err := json.Marshal(reqBody)
+	requestBodyBytes, err := json.Marshal(regRequestBody)
 	if err != nil {
-		utils.LogError("Error marshaling request: %v", err)
-		return
+		utils.LogError("Error marshaling registration request: %v", err)
+		return // Cannot proceed
 	}
 
-	// Crea la solicitud HTTP
-	url := fmt.Sprintf("http://%s/register", node)
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(bodyBytes))
-	if err != nil {
-		utils.LogError("Error creating request: %v", err)
-		return
-	}
-	req.Header.Set("Content-Type", "application/json") // Requerido por el semilla
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		utils.LogInfo("Attempt %d/%d to register with seed node %s", attempt, maxRetries, seedNodeAddress)
 
-	// Envía la solicitud
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		utils.LogError("Failed to register with node %s: %v", node, err)
-		return
-	}
-	defer resp.Body.Close()
+		// 1. Try to register
+		registrationSuccessful := false
+		var httpErr error
+		var resp *http.Response
 
-	// Maneja la respuesta
-	if resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusOK {
-		utils.LogInfo("Successfully registered with node %s", node)
-	} else {
-		utils.LogError("Failed to register with node %s: HTTP %d", node, resp.StatusCode)
+		regURL := fmt.Sprintf("http://%s/register", seedNodeAddress)
+		// Use requestBodyBytes for the request
+		req, err := http.NewRequest("POST", regURL, bytes.NewBuffer(requestBodyBytes))
+		if err != nil {
+			utils.LogError("Attempt %d: Error creating registration request: %v", attempt, err)
+			goto prepRetry
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		client := &http.Client{Timeout: 5 * time.Second}
+		resp, httpErr = client.Do(req)
+
+		if httpErr != nil {
+			utils.LogError("Attempt %d: Failed to send registration request to %s: %v", attempt, seedNodeAddress, httpErr)
+			goto prepRetry
+		}
+
+		if resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusOK {
+			utils.LogInfo("Attempt %d: Successfully registered with node %s (status %d)", attempt, seedNodeAddress, resp.StatusCode)
+			registrationSuccessful = true
+		} else {
+			utils.LogError("Attempt %d: Failed to register with node %s: HTTP %d", attempt, seedNodeAddress, resp.StatusCode)
+			// Make sure to close body even on non-2xx responses before retrying or exiting
+		}
+		// Always close the response body for the registration request
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
+
+
+		if !registrationSuccessful {
+			goto prepRetry
+		}
+
+		// 2. If registration is successful, try to fetch peers
+		utils.LogInfo("Attempt %d: Registration successful, now fetching peers from %s", attempt, seedNodeAddress)
+		peersWithStatus, err := n.getNodePeers(seedNodeAddress) // getNodePeers handles its own timeout and body closing
+		if err != nil {
+			utils.LogError("Attempt %d: Error fetching peers from %s after registration: %v", attempt, seedNodeAddress, err)
+			// Peer fetching failed, go to retry
+			goto prepRetry
+		}
+
+		// 3. If both steps are successful, store peers, update KnownNodes, log, and return.
+		n.discoveredPeersMutex.Lock()
+		n.discoveredPeersWithStatus = peersWithStatus
+		n.discoveredPeersMutex.Unlock()
+		utils.LogInfo("Attempt %d: Successfully fetched %d peers from %s", attempt, len(peersWithStatus), seedNodeAddress)
+
+		for _, peerStatus := range peersWithStatus {
+			if peerStatus.Address != n.ID { // Don't add self
+				// AddNodeStatus handles logic for new/update and logging
+				n.AddNodeStatus(*peerStatus)
+			}
+		}
+		utils.LogInfo("Successfully registered and fetched peers from %s after %d attempt(s).", seedNodeAddress, attempt)
+		return // Success!
+
+	prepRetry:
+		// If not the last attempt, wait with exponential backoff
+		if attempt < maxRetries {
+			backoffDuration := baseBackoff * time.Duration(1<<(attempt-1)) // 5s, 10s, 20s, 40s
+			utils.LogInfo("Attempt %d failed. Retrying in %v...", attempt, backoffDuration)
+			time.Sleep(backoffDuration)
+		}
 	}
+
+	utils.LogError("All %d attempts to register with and fetch peers from %s failed.", maxRetries, seedNodeAddress)
 }
 
-// AddNode adds a new node to the known nodes list
-func (n *Node) AddNode(node string) bool {
-	n.mutex.Lock()
-	defer n.mutex.Unlock()
-
-	if !utils.Contains(n.KnownNodes, node) {
-		n.KnownNodes = append(n.KnownNodes, node)
-		utils.LogInfo("New node added: %s", node)
-		return true
+// AddNode adds a new node with 'unknown' type.
+// Prefer AddNodeStatus if NodeType is known.
+func (n *Node) AddNode(address string) {
+	if address == n.ID { // Do not add self
+		return
 	}
-
-	utils.LogDebug("Node already known: %s", node)
-	return false
+	// This will log if it's new or updates (though update is less likely here unless type changes from 'unknown')
+	n.AddNodeStatus(NodeStatus{Address: address, NodeType: "unknown"})
 }
 
-// GetKnownNodes returns a copy of the known nodes list
+// GetKnownNodes returns a slice of known node addresses.
+// Consider if this is still needed widely, or if GetKnownNodeStatuses is preferred.
 func (n *Node) GetKnownNodes() []string {
 	n.mutex.Lock()
 	defer n.mutex.Unlock()
 
-	// Return a copy to avoid concurrency issues
-	nodesCopy := make([]string, len(n.KnownNodes))
-	copy(nodesCopy, n.KnownNodes)
-	return nodesCopy
+	addresses := make([]string, 0, len(n.knownNodes))
+	for addr := range n.knownNodes {
+		addresses = append(addresses, addr)
+	}
+	return addresses
+}
+
+// GetDiscoveredPeersWithStatus returns a copy of the discovered peers with their status
+// from the last call to getNodePeers in RegisterWithNode.
+func (n *Node) GetDiscoveredPeersWithStatus() []*NodeStatus {
+	n.discoveredPeersMutex.Lock()
+	defer n.discoveredPeersMutex.Unlock()
+
+	if n.discoveredPeersWithStatus == nil {
+		return []*NodeStatus{} // Return empty slice if nil
+	}
+
+	// Return a copy to avoid external modification
+	peersCopy := make([]*NodeStatus, len(n.discoveredPeersWithStatus))
+	copy(peersCopy, n.discoveredPeersWithStatus)
+	return peersCopy
 }
