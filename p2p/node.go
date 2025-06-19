@@ -26,10 +26,10 @@ type Node struct {
 	Port       int
 	knownNodes map[string]NodeStatus // Changed from []string to map[string]NodeStatus
 	PrivateKey string
-	mutex      sync.Mutex            // Protects knownNodes
+	mutex      sync.Mutex // Protects knownNodes
 
 	discoveredPeersWithStatus []*NodeStatus // For results from specific getNodePeers calls
-	discoveredPeersMutex      sync.Mutex      // Protects discoveredPeersWithStatus
+	discoveredPeersMutex      sync.Mutex    // Protects discoveredPeersWithStatus
 }
 
 type NodeRegistrationRequest struct {
@@ -176,7 +176,6 @@ func (n *Node) RegisterWithNode(seedNodeAddress string) {
 	maxRetries := 5
 	baseBackoff := 5 * time.Second
 
-	// Revert payload to NodeRegistrationRequest
 	regRequestBody := NodeRegistrationRequest{
 		Address:  n.ID,
 		NodeType: n.NodeType,
@@ -184,85 +183,75 @@ func (n *Node) RegisterWithNode(seedNodeAddress string) {
 	requestBodyBytes, err := json.Marshal(regRequestBody)
 	if err != nil {
 		utils.LogError("Error marshaling registration request: %v", err)
-		return // Cannot proceed
+		return
 	}
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		utils.LogInfo("Attempt %d/%d to register with seed node %s", attempt, maxRetries, seedNodeAddress)
 
-		// 1. Try to register
-		registrationSuccessful := false
-		var httpErr error
-		var resp *http.Response
-
-		regURL := fmt.Sprintf("http://%s/register", seedNodeAddress)
-		// Use requestBodyBytes for the request
-		req, err := http.NewRequest("POST", regURL, bytes.NewBuffer(requestBodyBytes))
-		if err != nil {
-			utils.LogError("Attempt %d: Error creating registration request: %v", attempt, err)
-			goto prepRetry
-		}
-		req.Header.Set("Content-Type", "application/json")
-
-		client := &http.Client{Timeout: 5 * time.Second}
-		resp, httpErr = client.Do(req)
-
-		if httpErr != nil {
-			utils.LogError("Attempt %d: Failed to send registration request to %s: %v", attempt, seedNodeAddress, httpErr)
-			goto prepRetry
+		success := n.attemptRegistration(seedNodeAddress, requestBodyBytes, attempt)
+		if success {
+			utils.LogInfo("Successfully registered and fetched peers from %s after %d attempt(s).", seedNodeAddress, attempt)
+			return
 		}
 
-		if resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusOK {
-			utils.LogInfo("Attempt %d: Successfully registered with node %s (status %d)", attempt, seedNodeAddress, resp.StatusCode)
-			registrationSuccessful = true
-		} else {
-			utils.LogError("Attempt %d: Failed to register with node %s: HTTP %d", attempt, seedNodeAddress, resp.StatusCode)
-			// Make sure to close body even on non-2xx responses before retrying or exiting
-		}
-		// Always close the response body for the registration request
-		if resp != nil && resp.Body != nil {
-			resp.Body.Close()
-		}
-
-
-		if !registrationSuccessful {
-			goto prepRetry
-		}
-
-		// 2. If registration is successful, try to fetch peers
-		utils.LogInfo("Attempt %d: Registration successful, now fetching peers from %s", attempt, seedNodeAddress)
-		peersWithStatus, err := n.getNodePeers(seedNodeAddress) // getNodePeers handles its own timeout and body closing
-		if err != nil {
-			utils.LogError("Attempt %d: Error fetching peers from %s after registration: %v", attempt, seedNodeAddress, err)
-			// Peer fetching failed, go to retry
-			goto prepRetry
-		}
-
-		// 3. If both steps are successful, store peers, update KnownNodes, log, and return.
-		n.discoveredPeersMutex.Lock()
-		n.discoveredPeersWithStatus = peersWithStatus
-		n.discoveredPeersMutex.Unlock()
-		utils.LogInfo("Attempt %d: Successfully fetched %d peers from %s", attempt, len(peersWithStatus), seedNodeAddress)
-
-		for _, peerStatus := range peersWithStatus {
-			if peerStatus.Address != n.ID { // Don't add self
-				// AddNodeStatus handles logic for new/update and logging
-				n.AddNodeStatus(*peerStatus)
-			}
-		}
-		utils.LogInfo("Successfully registered and fetched peers from %s after %d attempt(s).", seedNodeAddress, attempt)
-		return // Success!
-
-	prepRetry:
 		// If not the last attempt, wait with exponential backoff
 		if attempt < maxRetries {
-			backoffDuration := baseBackoff * time.Duration(1<<(attempt-1)) // 5s, 10s, 20s, 40s
+			backoffDuration := baseBackoff * time.Duration(1<<(attempt-1))
 			utils.LogInfo("Attempt %d failed. Retrying in %v...", attempt, backoffDuration)
 			time.Sleep(backoffDuration)
 		}
 	}
 
 	utils.LogError("All %d attempts to register with and fetch peers from %s failed.", maxRetries, seedNodeAddress)
+}
+
+func (n *Node) attemptRegistration(seedNodeAddress string, requestBodyBytes []byte, attempt int) bool {
+	// 1. Try to register
+	regURL := fmt.Sprintf("http://%s/register", seedNodeAddress)
+	req, err := http.NewRequest("POST", regURL, bytes.NewBuffer(requestBodyBytes))
+	if err != nil {
+		utils.LogError("Attempt %d: Error creating registration request: %v", attempt, err)
+		return false
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		utils.LogError("Attempt %d: Failed to send registration request to %s: %v", attempt, seedNodeAddress, err)
+		return false
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		utils.LogError("Attempt %d: Failed to register with node %s: HTTP %d", attempt, seedNodeAddress, resp.StatusCode)
+		return false
+	}
+
+	utils.LogInfo("Attempt %d: Successfully registered with node %s (status %d)", attempt, seedNodeAddress, resp.StatusCode)
+
+	// 2. Try to fetch peers
+	utils.LogInfo("Attempt %d: Registration successful, now fetching peers from %s", attempt, seedNodeAddress)
+	peersWithStatus, err := n.getNodePeers(seedNodeAddress)
+	if err != nil {
+		utils.LogError("Attempt %d: Error fetching peers from %s after registration: %v", attempt, seedNodeAddress, err)
+		return false
+	}
+
+	// 3. Store peers and update known nodes
+	n.discoveredPeersMutex.Lock()
+	n.discoveredPeersWithStatus = peersWithStatus
+	n.discoveredPeersMutex.Unlock()
+	utils.LogInfo("Attempt %d: Successfully fetched %d peers from %s", attempt, len(peersWithStatus), seedNodeAddress)
+
+	for _, peerStatus := range peersWithStatus {
+		if peerStatus.Address != n.ID {
+			n.AddNodeStatus(*peerStatus)
+		}
+	}
+
+	return true
 }
 
 // AddNode adds a new node with 'unknown' type.

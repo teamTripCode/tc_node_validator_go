@@ -313,14 +313,7 @@ func (d *DPoS) Initialize(nodeID string) error {
 
 	// Creamos delegados para simulación
 	// En producción, estos se registrarían dinámicamente
-	delegatesList := []string{
-		"localhost:3002", "localhost:3003",
-		"localhost:3004", "localhost:3005", "localhost:3006", "localhost:3007",
-		"localhost:3008", "localhost:3009", "localhost:3010", "localhost:3011",
-		"localhost:3012", "localhost:3013", "localhost:3014", "localhost:3015",
-		"localhost:3016", "localhost:3017", "localhost:3018", "localhost:3019",
-		"localhost:3020", "localhost:3021", "localhost:3022", "localhost:3023",
-	}
+	delegatesList := []string{}
 
 	// Initialize delegates with random stake
 	now := time.Now().UTC().Format(time.RFC3339)
