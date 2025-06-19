@@ -313,28 +313,6 @@ func (d *DPoS) Initialize(nodeID string) error {
 
 	// Creamos delegados para simulación
 	// En producción, estos se registrarían dinámicamente
-	delegatesList := []string{}
-
-	// Initialize delegates with random stake
-	now := time.Now().UTC().Format(time.RFC3339)
-	for _, id := range delegatesList {
-		stake := 100.0 + float64(rand.Intn(900))
-		reliability := 95.0 + float64(rand.Intn(5)) // 95-100% reliability
-
-		d.Delegates[id] = &DelegateInfo{
-			NodeID:        id,
-			Stake:         stake,
-			Votes:         0,
-			BlocksCreated: 0,
-			IsActive:      false,
-			LastActive:    now,
-			Reliability:   reliability,
-			RewardAccrued: 0.0,
-			MissedBlocks:  0,
-			CreationTime:  now,
-		}
-		d.StakeByNodeID[id] = stake
-	}
 
 	// Set up initial active delegates
 	d.UpdateActiveDelegates()
@@ -381,6 +359,10 @@ func (d *DPoS) updateSchedule() {
 		}
 
 		// Update current producer
+		if len(d.ActiveDelegates) == 0 || len(d.ActiveDelegates) < d.RoundLength {
+			utils.LogInfo("Waiting for sufficient delegates to join. Currently have %d, need %d.", len(d.ActiveDelegates), d.RoundLength)
+			return
+		}
 		d.CurrentProducer = d.ActiveDelegates[d.CurrentSlot]
 
 		utils.LogInfo("DPoS schedule updated. Round: %d, Slot: %d, Producer: %s",
