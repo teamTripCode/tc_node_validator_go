@@ -5,10 +5,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"strconv" // Added for FlexTimestamp
-	"strings" // Added for FlexTimestamp
-	"time"    // Added for NewTransaction helper
+	"fmt" // Added for FlexTimestamp
+	// Added for FlexTimestamp
+	"time" // Added for NewTransaction helper
 )
 
 // FlexTimestamp is a type that can unmarshal an int64 or a string representing an int64 from JSON.
@@ -16,27 +15,23 @@ type FlexTimestamp int64
 
 // UnmarshalJSON implements the json.Unmarshaler interface.
 func (ft *FlexTimestamp) UnmarshalJSON(data []byte) error {
-	// Try to unmarshal as an int64 directly.
 	var i int64
 	if err := json.Unmarshal(data, &i); err == nil {
 		*ft = FlexTimestamp(i)
 		return nil
 	}
 
-	// If direct unmarshalling fails, try to unmarshal as a string and convert.
 	var s string
 	if err := json.Unmarshal(data, &s); err != nil {
-		return fmt.Errorf("timestamp is not a valid string or integer: %v", err)
+		return errors.New("timestamp must be int64 or string")
 	}
 
-	// Remove quotes if present (json.Unmarshal to string sometimes keeps them)
-	s = strings.Trim(s, "\"")
-
-	parsedInt, err := strconv.ParseInt(s, 10, 64)
+	// Intentar parsear como fecha ISO
+	t, err := time.Parse(time.RFC3339, s)
 	if err != nil {
-		return fmt.Errorf("failed to parse timestamp string to int64: %v", err)
+		return fmt.Errorf("invalid timestamp format: %s", s)
 	}
-	*ft = FlexTimestamp(parsedInt)
+	*ft = FlexTimestamp(t.Unix()) // Convertir a Unix time (segundos)
 	return nil
 }
 

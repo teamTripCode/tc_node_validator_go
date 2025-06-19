@@ -6,3 +6,5 @@
 !go.sum
 !*.go
 !Dockerfile
+
+/k8s/secrets.yaml
