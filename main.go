@@ -12,7 +12,7 @@ import (
 
 	"tripcodechain_go/blockchain"
 	"tripcodechain_go/consensus"
-	"tripcodechain_go/llm" // Added for DistributedLLMService
+	"tripcodechain_go/llm"
 	"tripcodechain_go/mempool"
 	"tripcodechain_go/p2p"
 	"tripcodechain_go/utils"
@@ -210,27 +210,25 @@ func setupGracefulShutdown() {
 
 func updateValidatorsPeriodically(s *p2p.Server) {
 	ticker := time.NewTicker(5 * time.Minute) // Consider making this configurable or shorter for faster updates
-	for {
-		select {
-		case <-ticker.C:
-			// Pass s.Node instead of s.TxChain
-			validators, err := getCurrentValidators(s.Node)
-			if err == nil {
-				// Ensure Consensus is DPoS type if not already guaranteed by txChain setup
-				consensusModule := s.TxChain.GetConsensus()
-				dpos, ok := consensusModule.(*consensus.DPoS)
-				if !ok {
-					utils.LogError("Consensus module for TxChain is not DPoS, cannot update validators dynamically.")
-					continue
-				}
-				validatorInfos := make([]consensus.ValidatorInfo, len(validators))
-				for i, v := range validators {
-					validatorInfos[i] = consensus.ValidatorInfo{Address: v}
-				}
-				dpos.UpdateValidators(validatorInfos)
-			} else {
-				utils.LogError("Failed to get current validators: %v", err)
+	defer ticker.Stop()
+	for range ticker.C {
+		// Pass s.Node instead of s.TxChain
+		validators, err := getCurrentValidators(s.Node)
+		if err == nil {
+			// Ensure Consensus is DPoS type if not already guaranteed by txChain setup
+			consensusModule := s.TxChain.GetConsensus()
+			dpos, ok := consensusModule.(*consensus.DPoS)
+			if !ok {
+				utils.LogError("Consensus module for TxChain is not DPoS, cannot update validators dynamically.")
+				continue
 			}
+			validatorInfos := make([]consensus.ValidatorInfo, len(validators))
+			for i, v := range validators {
+				validatorInfos[i] = consensus.ValidatorInfo{Address: v}
+			}
+			dpos.UpdateValidators(validatorInfos)
+		} else {
+			utils.LogError("Failed to get current validators: %v", err)
 		}
 	}
 }

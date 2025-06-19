@@ -4,7 +4,6 @@ package consensus
 import (
 	"fmt"
 	"math/big"
-	"math/rand"
 	"sync"
 	"time"
 
