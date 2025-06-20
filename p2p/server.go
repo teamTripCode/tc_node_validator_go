@@ -1,9 +1,10 @@
 package p2p
 
 import (
+	"context" // Added for Shutdown method
 	"encoding/json"
 	"fmt"
-	"log"
+	// "log" // Removed as unused
 	"net/http"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"tripcodechain_go/consensus" // Added for DPoS
 
 	"github.com/gorilla/mux"
+	"github.com/prometheus/client_golang/prometheus/promhttp" // Added for metrics
 )
 
 // Server represents the HTTP server for the blockchain node
@@ -28,6 +30,7 @@ type Server struct {
 	LLMService      MCPResponseProcessor // Changed to interface
 	localLLM        LocalLLMProcessor    // Changed to interface
 	DPoS            *consensus.DPoS      // Added DPoS field
+	httpServer      *http.Server         // Added for graceful shutdown
 }
 
 // NewServer creates a new server instance
@@ -106,6 +109,10 @@ func (s *Server) SetupRoutes() { // llmAPIHandler parameter removed
 	// Heartbeat endpoint
 	s.Router.HandleFunc("/heartbeat", s.HeartbeatHandler).Methods("POST")
 
+	// Metrics endpoint
+	s.Router.Handle("/metrics", promhttp.Handler())
+	utils.LogInfo("Exposing /metrics endpoint for Prometheus.")
+
 	// LLM API routes are now registered in main.go
 }
 
@@ -125,18 +132,34 @@ func (s *Server) GetNodeMgr() *NodeManager {
 }
 
 // Start starts the HTTP server
-func (s *Server) Start() {
+func (s *Server) Start() error { // Modified to return error
 	utils.LogInfo("Server starting on port %d", s.Node.Port)
 
 	// Set timeouts for the server
-	srv := &http.Server{
+	s.httpServer = &http.Server{ // Store server instance
 		Handler:      s.Router,
 		Addr:         fmt.Sprintf(":%d", s.Node.Port),
 		WriteTimeout: 15 * time.Second,
 		ReadTimeout:  15 * time.Second,
 	}
 
-	log.Fatal(srv.ListenAndServe())
+	utils.LogInfo("HTTP server listening on %s", s.httpServer.Addr)
+	err := s.httpServer.ListenAndServe()
+	if err != nil && err != http.ErrServerClosed { // Don't log ErrServerClosed as fatal
+		utils.LogError("HTTP server ListenAndServe error: %v", err)
+		return err
+	}
+	utils.LogInfo("HTTP server stopped.")
+	return nil
+}
+
+// Shutdown gracefully shuts down the HTTP server.
+func (s *Server) Shutdown(ctx context.Context) error {
+	if s.httpServer == nil {
+		return fmt.Errorf("HTTP server not started or already shut down")
+	}
+	utils.LogInfo("HTTP server shutting down...")
+	return s.httpServer.Shutdown(ctx)
 }
 
 // StartBackgroundProcessing starts the mempool processing jobs
