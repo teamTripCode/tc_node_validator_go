@@ -23,15 +23,15 @@ import (
 
 // AppConfig holds all startup configurations
 type AppConfig struct {
-	Port                  int
-	Verbose               bool
-	DataDir               string
-	SeedNodesStr          string
-	NodeTypeStr           string
-	BootstrapPeersStr     string
-	IPScannerEnabled      bool
-	IPScanRangesStr       string
-	IPScanTargetPortStr   string
+	Port                int
+	Verbose             bool
+	DataDir             string
+	SeedNodesStr        string
+	NodeTypeStr         string
+	BootstrapPeersStr   string
+	IPScannerEnabled    bool
+	IPScanRangesStr     string
+	IPScanTargetPortStr string
 }
 
 func loadConfig() *AppConfig {
@@ -62,8 +62,8 @@ func main() {
 
 	// 2. Setup Logging
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds) // Keep existing flags
-	log.SetOutput(os.Stdout) // Keep existing output
-	utils.SetVerbose(config.Verbose) // Set verbosity based on config
+	log.SetOutput(os.Stdout)                                // Keep existing output
+	utils.SetVerbose(config.Verbose)                        // Set verbosity based on config
 
 	utils.LogInfo("Application starting...")
 
@@ -94,7 +94,6 @@ func main() {
 	// Determine Node ID for DPoS (using HTTP address for now)
 	nodeID := fmt.Sprintf("localhost:%d", config.Port)
 
-
 	// Initialize DPoS Consensus for Transaction Chain
 	var dposInstance *consensus.DPoS
 	consensusTxService, err := consensus.NewConsensus("DPOS", nodeID, currencyManager)
@@ -107,8 +106,8 @@ func main() {
 		log.Fatalf("Consensus service for TxChain is not of type DPoS")
 	}
 	if err := dposInstance.Initialize(nodeID); err != nil {
-        log.Fatalf("Failed to initialize DPoS: %v", err)
-    }
+		log.Fatalf("Failed to initialize DPoS: %v", err)
+	}
 
 	// Initialize PBFT Consensus for Critical Chain
 	consensusCritical, err := consensus.NewConsensus("PBFT", nodeID, currencyManager)
@@ -163,23 +162,25 @@ func main() {
 	utils.PrintStartupMessage(node.ID, config.Port)
 	utils.LogInfo("Node Type: %s", node.NodeType)
 
-
 	// 6. Initialize P2P Server
 	// LLM Service Initialization (assuming it's needed for the server)
 	llmConfig, err := llm.LoadLLMConfig("llm/config.json")
-	if err != nil { log.Fatalf("FATAL: Failed to load LLM configuration: %v", err) }
+	if err != nil {
+		log.Fatalf("FATAL: Failed to load LLM configuration: %v", err)
+	}
 	localLLMClient := llm.NewLocalLLMClient(llmConfig)
-	if localLLMClient == nil { log.Fatalf("FATAL: Failed to create LocalLLMClient.") }
+	if localLLMClient == nil {
+		log.Fatalf("FATAL: Failed to create LocalLLMClient.")
+	}
 
 	p2pServer := p2p.NewServer(node, txChain, criticalChain, txMempool, criticalMempool, nil, localLLMClient, dposInstance)
 	llmService := llm.NewDistributedLLMService(p2pServer)
 	p2pServer.LLMService = llmService
 	llmAPIHandler := llm.NewLLMAPIHandler(llmService)
-	p2pServer.SetupRoutes() // P2P routes
+	p2pServer.SetupRoutes()                              // P2P routes
 	if llmAPIHandler != nil && p2pServer.Router != nil { // LLM routes
 		p2pServer.Router.HandleFunc("/api/v1/llm/query", llmAPIHandler.HandleQuery).Methods("POST")
 	}
-
 
 	// 7. Start P2P Background Services
 	if node.Libp2pHost != nil { // Check if Libp2pHost was initialized
@@ -202,16 +203,16 @@ func main() {
 				}
 			}
 		} else if len(node.GetDefaultBootstrapPeers()) > 0 {
-            // If no HTTP seeds, but libp2p bootstrap peers are available, use them directly
-            utils.LogInfo("No HTTP seed nodes. Attempting direct DHT bootstrap with default peers.")
-            go func() {
-                if err := node.BootstrapDHT(node.GetDefaultBootstrapPeers()); err != nil {
-                    utils.LogError("Direct DHT bootstrapping failed: %v", err)
-                }
-            }()
-        } else {
-             utils.LogInfo("No HTTP seed nodes or default LibP2P bootstrap peers provided.")
-        }
+			// If no HTTP seeds, but libp2p bootstrap peers are available, use them directly
+			utils.LogInfo("No HTTP seed nodes. Attempting direct DHT bootstrap with default peers.")
+			go func() {
+				if err := node.BootstrapDHT(node.GetDefaultBootstrapPeers()); err != nil {
+					utils.LogError("Direct DHT bootstrapping failed: %v", err)
+				}
+			}()
+		} else {
+			utils.LogInfo("No HTTP seed nodes or default LibP2P bootstrap peers provided.")
+		}
 
 		if node.PubSubService != nil {
 			utils.LogInfo("Starting Gossip protocol for validator lists...")
@@ -229,17 +230,15 @@ func main() {
 		utils.LogInfo("Libp2pHost not initialized. Skipping most P2P background services.")
 	}
 
-
 	// 8. Start other background processes
 	go p2pServer.StartBackgroundProcessing() // Mempool processing
 	utils.LogInfo("Background processing (mempools) started")
-	go p2pServer.SyncChains() // Initial chain sync
+	go p2pServer.SyncChains()                  // Initial chain sync
 	go updateValidatorsPeriodically(p2pServer) // DPoS validator updates
 
 	// 9. Setup Graceful Shutdown
 	// Pass p2pServer to shutdown its HTTP server as well
 	setupGracefulShutdown(appCtx, cancelApp, node, p2pServer)
-
 
 	// 10. Start HTTP Server (blocking)
 	utils.LogInfo("Starting HTTP server on port %d...", config.Port)
@@ -252,7 +251,7 @@ func main() {
 	utils.LogInfo("Application shutting down.")
 }
 
-func setupGracefulShutdown(appCtx context.Context, cancelApp context.CancelFunc, node *p2p.Node, server *p2p.Server) {
+func setupGracefulShutdown(_ context.Context, cancelApp context.CancelFunc, node *p2p.Node, server *p2p.Server) {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 
@@ -287,7 +286,6 @@ func setupGracefulShutdown(appCtx context.Context, cancelApp context.CancelFunc,
 		os.Exit(0)
 	}()
 }
-
 
 // This main discovery loop is now illustrative, as DiscoverNodes is called by a Ticker in p2p.Node's StartP2PDiscoveryLoop
 // Or, if DiscoverNodes is meant to be called from main, it should be structured like this.
@@ -448,8 +446,7 @@ func getCurrentValidators(node *p2p.Node) ([]string, error) {
 // In p2p.Node, add P2pCtx() accessor
 // func (n *Node) P2pCtx() context.Context {
 //    return n.p2pCtx
-// }
-// This is used by updateValidatorsPeriodically.
+// }// This is used by updateValidatorsPeriodically.
 // For now, I'll assume direct access if it's in the same package or adjust.
 // The current code `s.Node.P2pCtx()` implies P2pCtx is already a public method or field.
 // Let's assume it's a public field `P2pCtx` for now, or I'll add the accessor.
