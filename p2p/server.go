@@ -2,6 +2,7 @@ package p2p
 
 import (
 	"context" // Added for Shutdown method
+	"encoding/base64" // Added for signBlock
 	"encoding/json"
 	"fmt"
 	// "log" // Removed as unused
@@ -160,6 +161,25 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 	utils.LogInfo("HTTP server shutting down...")
 	return s.httpServer.Shutdown(ctx)
+}
+
+// signBlock signs a block hash using the node's signer.
+// It returns the base64 encoded signature or an empty string on error.
+func (s *Server) signBlock(blockHash string) string {
+	data := []byte(blockHash)
+
+	if s.Node == nil || s.Node.Signer == nil {
+		utils.LogError("signBlock: Node or Signer is nil")
+		return ""
+	}
+
+	signatureBytes, err := s.Node.Signer.Sign(data)
+	if err != nil {
+		utils.LogError("signBlock: Error signing data: %v", err)
+		return ""
+	}
+
+	return base64.StdEncoding.EncodeToString(signatureBytes)
 }
 
 // StartBackgroundProcessing starts the mempool processing jobs
