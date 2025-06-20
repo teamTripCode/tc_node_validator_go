@@ -26,7 +26,7 @@ func (s *Server) BroadcastNewBlock(block *blockchain.Block, chainType string) {
 	}
 
 	// Firmar el bloque
-	message.Signature = s.signBlock(block.Hash, s.Node.PrivateKey)
+	message.Signature = s.signBlock(block.Hash)
 
 	blockData, _ := json.Marshal(block)
 
