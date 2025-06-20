@@ -94,21 +94,6 @@ func (d *DPoS) AddValidator(address string) {
 	}
 }
 
-func (d *DPoS) selectBlockProducer() string {
-	// El validador con mayor stake produce el bloque
-	var selected string
-	maxStake := big.NewInt(0)
-
-	for addr, stake := range d.validators {
-		if stake.Cmp(maxStake) > 0 {
-			maxStake = stake
-			selected = addr
-		}
-	}
-
-	return selected
-}
-
 // SlashDelegate slashes a delegate based on severity. This is the original SlashValidator function, renamed.
 func (d *DPoS) SlashDelegate(address string, severity string) error {
 	d.mutex.Lock()
