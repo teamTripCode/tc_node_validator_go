@@ -247,6 +247,8 @@ func main() {
 	utils.LogInfo("Background processing (mempools) started")
 	go p2pServer.SyncChains()                  // Initial chain sync
 	go updateValidatorsPeriodically(p2pServer) // DPoS validator updates
+	go p2p.StartPBFTWebsocketServer(nodeID, 8546, consensusCritical) // Start PBFT WebSocket server
+	go p2p.StartPBOSWebsocketServer(nodeID, 8547) // Start pBOS WebSocket server
 
 	// 9. Setup Graceful Shutdown
 	// Pass p2pServer to shutdown its HTTP server as well
