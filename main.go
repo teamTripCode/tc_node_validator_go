@@ -56,8 +56,8 @@ func main() {
 
 	if seedNodesStr != "" {
 		utils.LogInfo("Loading seed nodes from %s: %s", seedNodesSource, seedNodesStr)
-		seeds := strings.Split(seedNodesStr, ",")
-		for _, seed := range seeds {
+		seeds := strings.SplitSeq(seedNodesStr, ",")
+		for seed := range seeds {
 			trimmedSeed := strings.TrimSpace(seed)
 			if trimmedSeed != "" {
 				node.AddNode(trimmedSeed) // AddNode should handle if it's already known or self

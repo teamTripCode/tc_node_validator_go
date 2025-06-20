@@ -5,9 +5,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"tripcodechain_go/p2p" // For p2p.MCPResponse
 	"tripcodechain_go/utils"
+
+	"github.com/google/uuid"
 )
 
 // QueryState holds the state of a distributed query.
@@ -96,12 +97,9 @@ func (s *DistributedLLMService) Query(requestPayload []byte, timeout time.Durati
 
 	// Cleanup and collect responses
 	s.queriesMutex.Lock()
-	// Check if queryState still exists, it might have been removed by a concurrent process or multiple timeouts
-	if _, ok := s.activeQueries[queryID]; ok {
-		delete(s.activeQueries, queryID)
-		// Consider closing DoneChan here carefully. If Query() is the sole owner of deletion and timeout, it's safer.
-		// close(queryState.DoneChan) // Ensure this is safe from concurrent writes.
-	}
+	delete(s.activeQueries, queryID)
+	// Consider closing DoneChan here carefully. If Query() is the sole owner of deletion and timeout, it's safer.
+	// close(queryState.DoneChan) // Ensure this is safe from concurrent writes.
 	s.queriesMutex.Unlock()
 
 	queryState.Mutex.Lock()

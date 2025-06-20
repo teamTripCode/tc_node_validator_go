@@ -94,21 +94,19 @@ func (n *Node) GetKnownNodeStatuses() []NodeStatus {
 // StartHeartbeat sends regular status updates
 func (n *Node) StartHeartbeat() {
 	ticker := time.NewTicker(5 * time.Second)
-	for {
-		select {
-		case <-ticker.C:
-			status := map[string]any{
-				"nodeId":     n.ID,
-				"timestamp":  time.Now().UTC().Format(time.RFC3339),
-				"knownNodes": n.GetKnownNodes(),
-			}
-			utils.LogDebug("Heartbeat: %v", status)
+	defer ticker.Stop()
+	for range ticker.C {
+		status := map[string]any{
+			"nodeId":     n.ID,
+			"timestamp":  time.Now().UTC().Format(time.RFC3339),
+			"knownNodes": n.GetKnownNodes(),
+		}
+		utils.LogDebug("Heartbeat: %v", status)
 
-			// Try to ping other nodes
-			for _, node := range n.GetKnownNodes() {
-				if node != n.ID {
-					n.PingNode(node)
-				}
+		// Try to ping other nodes
+		for _, node := range n.GetKnownNodes() {
+			if node != n.ID {
+				n.PingNode(node)
 			}
 		}
 	}
