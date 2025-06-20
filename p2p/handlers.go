@@ -719,6 +719,8 @@ func (s *Server) HeartbeatHandler(w http.ResponseWriter, r *http.Request) {
 	// Update last seen time for the sender of the heartbeat
 	if s.Node != nil {
 		s.Node.UpdatePeerLastSeen(payload.NodeID) // payload.NodeID is the HTTP address
+		// Store the received validator view
+		s.Node.StorePeerValidatorView(payload.NodeID, payload.KnownValidators)
 	}
 
 
