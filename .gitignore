@@ -8,3 +8,4 @@
 !Dockerfile
 
 /k8s/secrets.yaml
+/scripts/cluster
