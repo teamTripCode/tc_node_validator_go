@@ -1,10 +1,11 @@
 package p2p
 
 import (
-	"context" // Added for Shutdown method
+	"context"         // Added for Shutdown method
 	"encoding/base64" // Added for signBlock
 	"encoding/json"
 	"fmt"
+
 	// "log" // Removed as unused
 	"net/http"
 	"time"
@@ -12,8 +13,10 @@ import (
 	"tripcodechain_go/blockchain"
 	// "tripcodechain_go/llm" // Removed as LocalLLMClient is replaced by LocalLLMProcessor interface
 	"tripcodechain_go/mempool"
+	"tripcodechain_go/pkg/validation" // Changed for DPoS types
 	"tripcodechain_go/utils"
-	"tripcodechain_go/consensus" // Added for DPoS
+
+	// "tripcodechain_go/consensus" // Removed if DPoS was the only reason
 
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus/promhttp" // Added for metrics
@@ -30,14 +33,14 @@ type Server struct {
 	NodeMgr         *NodeManager         // Added NodeManager
 	LLMService      MCPResponseProcessor // Changed to interface
 	localLLM        LocalLLMProcessor    // Changed to interface
-	DPoS            *consensus.DPoS      // Added DPoS field
+	DPoS            *validation.DPoS     // Changed DPoS field type
 	httpServer      *http.Server         // Added for graceful shutdown
 }
 
 // NewServer creates a new server instance
 func NewServer(node *Node, txChain *blockchain.Blockchain, criticalChain *blockchain.Blockchain,
 	txMempool *mempool.Mempool, criticalMempool *mempool.Mempool,
-	llmService MCPResponseProcessor, localLLMClient LocalLLMProcessor, dpos *consensus.DPoS) *Server { // Added dpos parameter
+	llmService MCPResponseProcessor, localLLMClient LocalLLMProcessor, dpos *validation.DPoS) *Server { // Changed dpos parameter type
 
 	server := &Server{
 		Router:          mux.NewRouter(),
@@ -237,8 +240,8 @@ func (s *Server) HandleMCPQuery(w http.ResponseWriter, r *http.Request) {
 			mcpResponse := &MCPResponse{
 				QueryID:         query.QueryID,
 				Timestamp:       time.Now().Unix(),
-				OriginNodeID:    query.OriginNodeID,    // This should be the original querier
-				ResponderNodeID: s.Node.ID,             // This node is responding
+				OriginNodeID:    query.OriginNodeID, // This should be the original querier
+				ResponderNodeID: s.Node.ID,          // This node is responding
 				Payload:         llmResponsePayload,
 				// Signature would be calculated here if implemented
 				// Signature: s.Node.SignData(mcpResponse.SignableData()) // Placeholder for signing

@@ -14,10 +14,11 @@ import (
 	"time"
 
 	"tripcodechain_go/blockchain"
-	"tripcodechain_go/consensus"
+	"tripcodechain_go/consensus" // Still needed for consensus.NewConsensus, consensus.Consensus interface
 	"tripcodechain_go/llm"
 	"tripcodechain_go/mempool"
 	"tripcodechain_go/p2p"
+	"tripcodechain_go/pkg/validation" // Added for validation.DPoS, validation.ValidatorInfo
 	"tripcodechain_go/utils"
 )
 
@@ -101,38 +102,23 @@ func main() {
 	nodeID := fmt.Sprintf("localhost:%d", config.Port)
 
 	// Initialize DPoS Consensus for Transaction Chain
-	var dposInstance *consensus.DPoS
-	consensusTxService, err := consensus.NewConsensus("DPOS", nodeID, currencyManager)
+	// For DPoS, we pass nil for broadcaster and logger as they are not used by DPoS currently.
+	consensusTxService, err := consensus.NewConsensus("DPOS", nodeID, currencyManager, nil, nil)
 	if err != nil {
 		log.Fatalf("Error initializing DPoS consensus service: %v", err)
 	}
 	var ok bool
-	dposInstance, ok = consensusTxService.(*consensus.DPoS)
+	// dposInstance is now *validation.DPoS
+	dposInstance, ok := consensusTxService.(*validation.DPoS)
 	if !ok {
-		log.Fatalf("Consensus service for TxChain is not of type DPoS")
+		// This check might be redundant if NewConsensus always returns the correct interface type
+		// or if the Initialize method (called within NewConsensus now) handles type assertion errors.
+		// However, keeping it for safety to ensure the cast to *validation.DPoS is valid.
+		log.Fatalf("Consensus service for TxChain is not of type *validation.DPoS as expected after NewConsensus call")
 	}
-	if err := dposInstance.Initialize(nodeID); err != nil {
-		log.Fatalf("Failed to initialize DPoS: %v", err)
-	}
+	// dposInstance.Initialize(nodeID) is now called within NewConsensus factory.
 
-	// Initialize PBFT Consensus for Critical Chain
-	consensusCritical, err := consensus.NewConsensus("PBFT", nodeID, currencyManager)
-	if err != nil {
-		log.Fatalf("Error initializing PBFT consensus: %v", err)
-	}
-
-	txChain.SetConsensus(dposInstance) // Use the concrete DPoS instance
-	criticalChain.SetConsensus(consensusCritical)
-	utils.LogInfo("Dual consensus system configured - DPoS for transactions, PBFT for critical processes")
-
-	blockchain.DeploySystemContracts(txChain, contractManager)
-	utils.LogInfo("Base smart contracts deployed")
-
-	txMempool := mempool.NewMempool()
-	criticalMempool := mempool.NewMempool()
-	utils.LogInfo("Mempools initialized - Transactions: %d, Processes: %d", txMempool.GetSize(), criticalMempool.GetSize())
-
-	// 5. Initialize P2P Node
+	// Initialize P2P Node (needed for PBFT Broadcaster)
 	initialBootstrapPeers := []string{}
 	if config.BootstrapPeersStr != "" {
 		initialBootstrapPeers = strings.Split(config.BootstrapPeersStr, ",")
@@ -155,8 +141,6 @@ func main() {
 			utils.LogError("Invalid IP_SCAN_TARGET_PORT: %v. Using default: %d", errConv, targetPortForScan)
 		}
 	}
-
-	// Create a specific subdirectory for keys within the data directory
 	keysDataDir := config.DataDir + "/keys"
 	if err := os.MkdirAll(keysDataDir, 0700); err != nil {
 		log.Fatalf("Error creating keys directory: %v", err)
@@ -171,6 +155,30 @@ func main() {
 	if config.NodeTypeStr != "" {
 		node.NodeType = config.NodeTypeStr
 	}
+
+	// Initialize PBFT Broadcaster and Logger using the p2p.Node instance
+	pbftBroadcaster := p2p.NewPBFTBroadcaster(node)
+	pbftLogger := p2p.NewPBFTLogger()
+
+	// Initialize PBFT Consensus for Critical Chain
+	consensusCritical, err := consensus.NewConsensus("PBFT", nodeID, currencyManager, pbftBroadcaster, pbftLogger)
+	if err != nil {
+		log.Fatalf("Error initializing PBFT consensus: %v", err)
+	}
+
+	txChain.SetConsensus(dposInstance) // Use the concrete DPoS instance
+	criticalChain.SetConsensus(consensusCritical)
+	utils.LogInfo("Dual consensus system configured - DPoS for transactions, PBFT for critical processes")
+
+	blockchain.DeploySystemContracts(txChain, contractManager)
+	utils.LogInfo("Base smart contracts deployed")
+
+	txMempool := mempool.NewMempool()
+	criticalMempool := mempool.NewMempool()
+	utils.LogInfo("Mempools initialized - Transactions: %d, Processes: %d", txMempool.GetSize(), criticalMempool.GetSize())
+
+	// P2P Node (node) already initialized above before PBFT setup.
+	// Now, just print startup messages and proceed.
 	utils.PrintStartupMessage(node.ID, config.Port)
 	utils.LogInfo("Node Type: %s", node.NodeType)
 
@@ -245,10 +253,10 @@ func main() {
 	// 8. Start other background processes
 	go p2pServer.StartBackgroundProcessing() // Mempool processing
 	utils.LogInfo("Background processing (mempools) started")
-	go p2pServer.SyncChains()                  // Initial chain sync
-	go updateValidatorsPeriodically(p2pServer) // DPoS validator updates
+	go p2pServer.SyncChains()                                        // Initial chain sync
+	go updateValidatorsPeriodically(p2pServer)                       // DPoS validator updates
 	go p2p.StartPBFTWebsocketServer(nodeID, 8546, consensusCritical) // Start PBFT WebSocket server
-	go p2p.StartPBOSWebsocketServer(nodeID, 8547) // Start pBOS WebSocket server
+	go p2p.StartPBOSWebsocketServer(nodeID, 8547)                    // Start pBOS WebSocket server
 
 	// 9. Setup Graceful Shutdown
 	// Pass p2pServer to shutdown its HTTP server as well
@@ -342,15 +350,21 @@ func updateValidatorsPeriodically(s *p2p.Server) {
 			validators, err := getCurrentValidators(s.Node)
 			if err == nil {
 				consensusModule := s.TxChain.GetConsensus()
-				dpos, ok := consensusModule.(*consensus.DPoS)
+				// Type assertion for dpos should be *validation.DPoS
+				dpos, ok := consensusModule.(*validation.DPoS)
 				if !ok {
-					utils.LogError("Consensus module for TxChain is not DPoS, cannot update validators dynamically.")
+					utils.LogError("Consensus module for TxChain is not *validation.DPoS, cannot update validators dynamically.")
 					continue
 				}
-				validatorInfos := make([]consensus.ValidatorInfo, len(validators))
+				// UpdateValidators on *validation.DPoS expects []validation.ValidatorInfo
+				validatorInfos := make([]validation.ValidatorInfo, len(validators))
 				for i, v := range validators {
-					validatorInfos[i] = consensus.ValidatorInfo{Address: v}
-
+					// Assuming consensus.ValidatorInfo is compatible or needs to be validation.ValidatorInfo
+					// If consensus.ValidatorInfo was defined in consensus/dpos.go, it's now validation.ValidatorInfo
+					// If consensus.ValidatorInfo is a generic type in consensus package, this might be okay,
+					// but more likely it should be validation.ValidatorInfo if that's what UpdateValidators expects.
+					// The dpos_types.go has ValidatorInfo, so it's validation.ValidatorInfo.
+					validatorInfos[i] = validation.ValidatorInfo{Address: v}
 				}
 				dpos.UpdateValidators(validatorInfos)
 			} else {
