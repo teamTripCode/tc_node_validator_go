@@ -25,6 +25,7 @@ import (
 	"github.com/multiformats/go-multiaddr"
 	"tripcodechain_go/utils"
 	"tripcodechain_go/consensus"
+	"tripcodechain_go/security"
 )
 
 const ValidatorServiceTag = "tripcodechain-validator"
@@ -77,7 +78,8 @@ type Node struct {
 	NodeType   string
 	Port       int
 	knownNodes map[string]NodeStatus
-	PrivateKey string
+	Signer     security.Signer
+	CryptoID   string
 	mutex      sync.RWMutex
 
 	discoveredPeersWithStatus []*NodeStatus
@@ -124,13 +126,25 @@ type NodeStatus struct {
 	NodeType string `json:"nodeType"`
 }
 
-func NewNode(port int, dpos *consensus.DPoS, initialBootstrapPeers []string, scannerEnabled bool, scanRanges []string, targetPortForScan int) *Node {
+func NewNode(port int, dpos *consensus.DPoS, initialBootstrapPeers []string, scannerEnabled bool, scanRanges []string, targetPortForScan int, dataDir string, passphrase string) *Node {
 	nodeID := fmt.Sprintf("localhost:%d", port)
+
+	localSigner, err := security.NewLocalSigner(dataDir, passphrase)
+	if err != nil {
+		utils.LogError("FATAL: Failed to initialize node signer: %v", err)
+		// In a real app, you might os.Exit(1) or ensure this error is handled gracefully upstream.
+		// For now, returning nil will likely cause a panic if not checked by the caller.
+		return nil
+	}
+	utils.LogInfo("Node signer initialized successfully.")
+
 	node := &Node{
 		ID:         nodeID,
 		NodeType:   "unknown",
 		Port:       port,
 		knownNodes: make(map[string]NodeStatus),
+		Signer:     localSigner,
+		CryptoID:   localSigner.Address(),
 		mutex:      sync.RWMutex{},
 		DPoS:                  dpos,
 		peerReputations:       make(map[string]*PeerReputation),
@@ -142,6 +156,7 @@ func NewNode(port int, dpos *consensus.DPoS, initialBootstrapPeers []string, sca
 		targetPeerHttpPort:    targetPortForScan,
 		metricsTicker:         time.NewTicker(30 * time.Second), // Initialize metrics ticker
 	}
+	utils.LogInfo("Node cryptographic ID: %s", node.CryptoID)
 
 	p2pCtx, p2pCancel := context.WithCancel(context.Background())
 	node.p2pCtx = p2pCtx

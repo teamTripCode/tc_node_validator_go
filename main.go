@@ -32,6 +32,7 @@ type AppConfig struct {
 	IPScannerEnabled    bool
 	IPScanRangesStr     string
 	IPScanTargetPortStr string
+	KeyPassphrase       string
 }
 
 func loadConfig() *AppConfig {
@@ -42,6 +43,7 @@ func loadConfig() *AppConfig {
 	flag.StringVar(&config.SeedNodesStr, "seed", os.Getenv("SEED_NODES"), "Comma-separated list of seed nodes (HTTP addresses)")
 	flag.StringVar(&config.NodeTypeStr, "nodetype", os.Getenv("NODE_TYPE"), "Type of the node (e.g., validator, regular)")
 	flag.StringVar(&config.BootstrapPeersStr, "bootstrap", os.Getenv("BOOTSTRAP_PEERS"), "Comma-separated LibP2P bootstrap peer multiaddresses")
+	flag.StringVar(&config.KeyPassphrase, "nodekeypass", os.Getenv("NODE_KEY_PASSPHRASE"), "Passphrase for the node's private key")
 
 	scannerEnabledEnv := os.Getenv("IP_SCANNER_ENABLED")
 	config.IPScannerEnabled = scannerEnabledEnv == "true"
@@ -50,6 +52,10 @@ func loadConfig() *AppConfig {
 	config.IPScanTargetPortStr = os.Getenv("IP_SCAN_TARGET_PORT")
 
 	flag.Parse()
+
+	if config.KeyPassphrase == "" {
+		log.Fatalf("Node key passphrase not provided. Set NODE_KEY_PASSPHRASE or use the -nodekeypass flag.")
+	}
 	return config
 }
 
@@ -150,7 +156,13 @@ func main() {
 		}
 	}
 
-	node := p2p.NewNode(config.Port, dposInstance, initialBootstrapPeers, config.IPScannerEnabled, ipScanRanges, targetPortForScan)
+	// Create a specific subdirectory for keys within the data directory
+	keysDataDir := config.DataDir + "/keys"
+	if err := os.MkdirAll(keysDataDir, 0700); err != nil {
+		log.Fatalf("Error creating keys directory: %v", err)
+	}
+
+	node := p2p.NewNode(config.Port, dposInstance, initialBootstrapPeers, config.IPScannerEnabled, ipScanRanges, targetPortForScan, keysDataDir, config.KeyPassphrase)
 	if node == nil {
 		log.Fatalf("Failed to create p2p.Node, NewNode returned nil.")
 	}
