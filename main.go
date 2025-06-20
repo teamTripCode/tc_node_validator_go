@@ -36,10 +36,40 @@ func main() {
 	// Set verbose mode
 	utils.SetVerbose(*verboseFlag)
 
+	// Initialize DPoS (before NewNode and NewServer)
+	// consensusTx is already initialized as a DPoS instance later, let's use that or create one dedicated for p2p needs.
+	// For now, let's assume consensusTx (which is *DPoS) will be used.
+	// It's initialized later, so we need to adjust the order or pass a placeholder.
+	// For now, we will initialize DPoS here and ensure it's the same one used by txChain.
+
+	// Create a DPoS instance for p2p components.
+	// Note: `currencyManager` is initialized later. This is a temporary DPoS for p2p.Node.
+	// The DPoS instance for the actual consensus mechanism (consensusTx) is created later.
+	// This highlights a potential need to refactor DPoS initialization or how it's accessed.
+	// For this step, we'll create a temporary dposP2P.
+	// A better approach might be to initialize all main components first, then pass them around.
+	dposP2P := consensus.NewDPoS(nil) // Passing nil for currencyManager initially for p2p.Node
+	// It's crucial that p2p.Node.DPoS and p2p.Server.DPoS point to the *actual* DPoS instance
+	// used by the consensus mechanism. This will be adjusted when consensusTx is created.
+
 	// Create new node
-	node := p2p.NewNode(*portFlag)
-	node.NodeType = "validator"
+	node := p2p.NewNode(*portFlag, dposP2P) // Pass DPoS to NewNode
+	if node == nil {
+		log.Fatalf("Failed to create p2p.Node, NewNode returned nil.")
+	}
+	node.NodeType = "validator" // Example: set node type
 	utils.PrintStartupMessage(node.ID, *portFlag)
+
+	// If this node is a validator, start advertising itself on the DHT.
+	// This should be done after the LibP2P host and DHT are initialized in NewNode.
+	if node.NodeType == "validator" {
+		if node.Libp2pHost != nil { // Check if Libp2pHost was initialized
+			utils.LogInfo("Node is a validator, attempting to advertise on DHT...")
+			go node.AdvertiseAsValidator()
+		} else {
+			utils.LogInfo("Node is a validator, but Libp2pHost not initialized. Skipping DHT advertisement.")
+		}
+	}
 
 	// Determine seed nodes: prioritize environment variable, then flag
 	var seedNodesStr string
@@ -56,12 +86,18 @@ func main() {
 
 	if seedNodesStr != "" {
 		utils.LogInfo("Loading seed nodes from %s: %s", seedNodesSource, seedNodesStr)
-		seeds := strings.SplitSeq(seedNodesStr, ",")
-		for seed := range seeds {
+		seedsSlice := strings.Split(seedNodesStr, ",") // Use strings.Split
+		var defaultLibp2pBootstrapPeers []string      // Define empty slice for now
+		// Example: defaultLibp2pBootstrapPeers = []string{"/ip4/127.0.0.1/tcp/11001/p2p/QmAnotherPeer"}
+
+		for _, seed := range seedsSlice { // Corrected loop
 			trimmedSeed := strings.TrimSpace(seed)
 			if trimmedSeed != "" {
-				node.AddNode(trimmedSeed) // AddNode should handle if it's already known or self
-				go node.RegisterWithNode(trimmedSeed)
+				// The old AddNode and RegisterWithNode might be redundant if DHT is primary
+				// For now, keeping existing behavior and adding DHT bootstrap call.
+				// node.AddNode(trimmedSeed) // This adds to the HTTP knownNodes
+				utils.LogInfo("Attempting to register with seed node %s (HTTP) and bootstrap DHT", trimmedSeed)
+				go node.RegisterWithNode(trimmedSeed, defaultLibp2pBootstrapPeers)
 			}
 		}
 	} else {
@@ -94,10 +130,21 @@ func main() {
 	utils.LogInfo("Critical process chain initialized with %d blocks", criticalChain.GetLength())
 
 	// Configure dual consensus systems
-	consensusTx, err := consensus.NewConsensus("DPOS", node.ID, currencyManager)
+	// Use the DPoS instance created for p2p.Node for consensusTx as well, or ensure they are the same.
+	// The current `NewConsensus` returns a `Consensus` interface. We need the concrete DPoS type.
+	var dposInstance *consensus.DPoS
+	consensusTxService, err := consensus.NewConsensus("DPOS", node.ID, currencyManager)
 	if err != nil {
-		log.Fatal("Error initializing DPoS consensus:", err)
+		log.Fatal("Error initializing DPoS consensus service:", err)
 	}
+	var ok bool
+	dposInstance, ok = consensusTxService.(*consensus.DPoS)
+	if !ok {
+		log.Fatal("Consensus service for TxChain is not of type DPoS")
+	}
+	// Now, ensure the node and server use this fully initialized DPoS instance.
+	node.DPoS = dposInstance      // Update node's DPoS to the fully initialized one
+	dposP2P = dposInstance        // Ensure dposP2P also points to this, if used by server separately
 
 	consensusCritical, err := consensus.NewConsensus("PBFT", node.ID, currencyManager)
 	if err != nil {
@@ -105,7 +152,7 @@ func main() {
 	}
 
 	// Assign consensus mechanisms to corresponding chains
-	txChain.SetConsensus(consensusTx)
+	txChain.SetConsensus(consensusTxService) // Corrected variable name
 	criticalChain.SetConsensus(consensusCritical)
 	utils.LogInfo("Dual consensus system configured - DPoS for transactions, PBFT for critical processes")
 
@@ -139,7 +186,8 @@ func main() {
 	// 1. Create P2P server instance.
 	// The MCPResponseProcessor (llmService) is set to nil initially.
 	// localLLMClient is passed as the LocalLLMProcessor.
-	p2pServer := p2p.NewServer(node, txChain, criticalChain, txMempool, criticalMempool, nil, localLLMClient)
+	// Pass the dposInstance (which is dposP2P, now updated to the actual consensus DPoS) to NewServer
+	p2pServer := p2p.NewServer(node, txChain, criticalChain, txMempool, criticalMempool, nil, localLLMClient, dposInstance)
 
 	// 2. Create DistributedLLMService. p2pServer implements llm.P2PBroadcaster.
 	llmService := llm.NewDistributedLLMService(p2pServer)
@@ -177,33 +225,56 @@ func main() {
 	// Actualizar validadores desde contrato
 	go updateValidatorsPeriodically(p2pServer)
 
-	// Start node monitoring
-	go node.StartHeartbeat()
-	utils.LogInfo("Node heartbeat started")
+	// Start node monitoring (now StartHeartbeatSender)
+	go node.StartHeartbeatSender()
+	utils.LogInfo("Node heartbeat sender started")
 
 	// Discover other nodes
 	go func() {
-		time.Sleep(2 * time.Second)
+		time.Sleep(2 * time.Second) // Initial delay before first discovery
 		node.DiscoverNodes()
 		utils.LogInfo("Node discovery initiated...")
 	}()
 
+	// Start Gossip Protocol
+	if node.PubSubService != nil {
+		utils.LogInfo("Starting Gossip protocol for validator lists...")
+		if err := node.StartGossip(); err != nil {
+			utils.LogError("Error starting gossip protocol: %v", err)
+			// Decide if this is fatal or if the node can continue without gossip
+		}
+	} else {
+		utils.LogInfo("PubSubService not available, skipping StartGossip.")
+	}
+
+	// Start Validator Monitoring
+	// Ensure DPoS is properly initialized and available in node.DPoS before calling this
+	if node.DPoS != nil {
+		utils.LogInfo("Starting validator monitoring service...")
+		node.StartValidatorMonitoring()
+	} else {
+		utils.LogInfo("DPoS not available in Node, skipping StartValidatorMonitoring.")
+	}
+
 	// Handle graceful shutdown
-	setupGracefulShutdown()
+	setupGracefulShutdown(node) // Pass node to graceful shutdown
 
 	// Start server (blocking)
 	utils.LogInfo("Starting server on port %d...", *portFlag)
 	p2pServer.Start()
 }
 
-func setupGracefulShutdown() {
+func setupGracefulShutdown(node *p2p.Node) { // Accept node
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
 		<-c
 		utils.LogInfo("Shutting down node...")
-		// Add resource cleanup here
+		if node != nil {
+			node.StopLibp2pServices() // Call the renamed stop function
+		}
+		// Add other resource cleanup here if necessary
 		os.Exit(0)
 	}()
 }
