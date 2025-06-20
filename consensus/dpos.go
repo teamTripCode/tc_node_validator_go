@@ -1,4 +1,3 @@
-// consensus/dpos.go
 package consensus
 
 import (

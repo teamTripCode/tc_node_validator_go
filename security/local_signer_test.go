@@ -133,7 +133,7 @@ func TestLocalSigner_SignAndVerify(t *testing.T) {
 	}
 
 	// Test with a different public key (generate a dummy one)
-	_, otherPublicKey, _ := ed25519.GenerateKey(nil) // Using nil reader is okay for dummy key not needing crypto security
+	otherPublicKey, _, _ := ed25519.GenerateKey(nil) // Using nil reader is okay for dummy key not needing crypto security
 	isOtherKeyValid := ed25519.Verify(otherPublicKey, dataToSign, signature)
 	if isOtherKeyValid {
 		t.Errorf("ed25519.Verify succeeded with a different public key, but should have failed")
