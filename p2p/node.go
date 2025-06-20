@@ -444,14 +444,6 @@ func (n *Node) getNodeStatusFromHttp(httpPeerAddress string) (*NodeStatus, error
 	return &status, nil
 }
 
-<<<<<<< HEAD
-func (n *Node) RegisterWithNode(seedNodeAddress string, libp2pBootstrapPeers []string) { /* ... unchanged ... */
-}
-
-func (n *Node) AddNode(address string)                      { /* ... unchanged ... */ }
-func (n *Node) GetKnownNodes() []string                     { /* ... unchanged ... */ return nil }
-func (n *Node) GetDiscoveredPeersWithStatus() []*NodeStatus { /* ... unchanged ... */ return nil }
-=======
 func (n *Node) getNodePeers(nodeAddress string) ([]*NodeStatus, error) {
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(fmt.Sprintf("http://%s/nodes", nodeAddress))
@@ -609,7 +601,6 @@ func (n *Node) GetDiscoveredPeersWithStatus() []*NodeStatus {
 
 	return copiedSlice
 }
->>>>>>> 6ce56344460a39f18f25b74e5af1c11fc2093194
 
 func (n *Node) StopLibp2pServices() {
 	if n.metricsTicker != nil {
@@ -725,12 +716,6 @@ func (n *Node) BootstrapDHT(bootstrapPeerAddrs []string) error {
 	return nil
 }
 
-<<<<<<< HEAD
-func (n *Node) AdvertiseAsValidator() { /* ... unchanged, uses p2pCtx ... */ }
-
-func (n *Node) FindValidatorsDHT() (<-chan peer.AddrInfo, error) { /* ... unchanged, uses p2pCtx ... */
-	return nil, nil
-=======
 func (n *Node) AdvertiseAsValidator() {
 	utils.LogInfo("Attempting to advertise self as a validator via DHT...")
 	if n.routingDiscovery == nil {
@@ -743,7 +728,6 @@ func (n *Node) AdvertiseAsValidator() {
 	}
 
 	// The Advertise function typically starts a background process.
-	// It doesn't usually return an error for the setup itself, but might log errors internally if things go wrong during announcement.
 	routing.Advertise(n.p2pCtx, n.routingDiscovery, ValidatorServiceTag)
 
 	// It's important to also ensure the DHT is in server mode and the host is listening.
@@ -774,7 +758,6 @@ func (n *Node) FindValidatorsDHT() (<-chan peer.AddrInfo, error) {
 
 	utils.LogInfo("Peer discovery process for validators started. Peers will be emitted on the returned channel.")
 	return peerChan, nil
->>>>>>> 6ce56344460a39f18f25b74e5af1c11fc2093194
 }
 
 func (n *Node) GetOrInitializeReputation(address string) *PeerReputation {

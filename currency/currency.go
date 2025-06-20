@@ -14,18 +14,18 @@ import (
 const (
 	// TCCDecimals represents decimal precision for TripCoin (similar to Ether's 18 decimals)
 	TCCDecimals    = 18
-	DefaultSystem  = "TCC"
+	DefaultSystem  = "TTK"
 	GenesisAddress = "GENESIS_ACCOUNT"
 
 	// Denominaciones en TCC
 	Quark    = 1    // Unidad atómica base
 	Proton   = 1e9  // 1 billón de Quark
-	TripCoin = 1e18 // Unidad estándar (1 TCC)
+	TripKoin = 1e18 // Unidad estándar (1 TTK)
 
 	// Initial supply and parameters
-	InitialSupply   = 1000000 * TripCoin // 1 million TCC initial supply
-	BlockReward     = 2 * TripCoin       // 2 TCC per block reward
-	MinimumStake    = 100 * TripCoin     // 100 TCC minimum stake for validators
+	InitialSupply   = 1000000 * TripKoin // 1 million TCC initial supply
+	BlockReward     = 2 * TripKoin       // 2 TCC per block reward
+	MinimumStake    = 100 * TripKoin     // 100 TCC minimum stake for validators
 	MinimumGasPrice = 1 * Proton         // 1 Proton minimum gas price
 	DefaultGasPrice = 20 * Proton        // 20 Proton default gas price
 	DefaultGasLimit = 21000              // Default gas limit for basic transactions
@@ -115,7 +115,7 @@ func (b *Balance) TripCoinString() string {
 	wei := new(big.Int).Set(b.Int)
 
 	// Calculate TripCoin part and wei part
-	tccUnit := new(big.Int).SetInt64(TripCoin)
+	tccUnit := new(big.Int).SetInt64(TripKoin)
 	tripCoinPart := new(big.Int).Div(wei, tccUnit)
 	weiPart := new(big.Int).Mod(wei, tccUnit)
 
@@ -180,7 +180,7 @@ func FromTripCoin(tcc float64) *Balance {
 	// Convert to Wei (TripCoin * 10^18)
 	weiValue := new(big.Float).Mul(
 		new(big.Float).SetFloat64(tcc),
-		new(big.Float).SetFloat64(TripCoin),
+		new(big.Float).SetFloat64(TripKoin),
 	)
 
 	// Convert big.Float to big.Int
