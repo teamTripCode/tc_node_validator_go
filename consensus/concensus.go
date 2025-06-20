@@ -2,20 +2,8 @@ package consensus
 
 import (
 	"tripcodechain_go/blockchain"
+	"tripcodechain_go/pkg/consensus_types" // Added import
 )
-
-// ConsensusType represents the type of consensus algorithm
-type ConsensusType string
-
-// Message represents a consensus message
-type Message struct {
-	Type      string `json:"type"`
-	NodeID    string `json:"nodeId"`
-	BlockHash string `json:"blockHash"`
-	BlockType string `json:"blockType"`
-	Data      any    `json:"data"`
-	Signature string `json:"signature"`
-}
 
 // Consensus interface defines methods that must be implemented by any consensus algorithm
 type Consensus interface {
@@ -26,7 +14,7 @@ type Consensus interface {
 	ValidateBlock(block *blockchain.Block) bool
 
 	// ProcessConsensusMessage processes an incoming consensus message
-	ProcessConsensusMessage(message *Message) error
+	ProcessConsensusMessage(message *consensus_types.Message) error // Updated type
 
 	// BroadcastPrepare broadcasts a prepare message for PBFT
 	BroadcastPrepare(block *blockchain.Block) error
@@ -41,5 +29,5 @@ type Consensus interface {
 	GetValidators() []string
 
 	// GetType returns the type of consensus algorithm
-	GetType() ConsensusType
+	GetType() consensus_types.ConsensusType // Updated type
 }

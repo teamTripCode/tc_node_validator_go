@@ -10,7 +10,8 @@ import (
 
 	"slices"
 	"tripcodechain_go/blockchain"
-	"tripcodechain_go/p2p" // Added for PBFT logging
+	consensus_events "tripcodechain_go/pkg/consensus_events" // Added for PBFT logging
+	"tripcodechain_go/pkg/consensus_types" // Added for Message and ConsensusType
 	"tripcodechain_go/utils"
 )
 
@@ -37,14 +38,18 @@ type PBFT struct {
 	SequenceNumber int                    // Sequence number for PBFT messages
 	mutex          sync.RWMutex           // Mutex for thread safety
 	viewChanges    map[string]map[int]int // Map of node ID to view number to count
+	Broadcaster    consensus_events.ConsensusBroadcaster
+	Logger         consensus_events.ConsensusLogger
 }
 
 // NewPBFT creates a new PBFT consensus instance
-func NewPBFT() *PBFT {
+func NewPBFT(broadcaster consensus_events.ConsensusBroadcaster, logger consensus_events.ConsensusLogger) *PBFT {
 	return &PBFT{
 		BlockStates: make(map[string]*PBFTState),
 		View:        0,
 		viewChanges: make(map[string]map[int]int),
+		Broadcaster: broadcaster,
+		Logger:      logger,
 	}
 }
 
@@ -84,7 +89,7 @@ func (p *PBFT) GetBlockState(block *blockchain.Block) *PBFTState {
 }
 
 // ProcessConsensusMessage processes an incoming PBFT consensus message
-func (p *PBFT) ProcessConsensusMessage(message *Message) error {
+func (p *PBFT) ProcessConsensusMessage(message *consensus_types.Message) error {
 	var block blockchain.Block
 	blockData, err := json.Marshal(message.Data)
 	if err != nil {
@@ -192,7 +197,7 @@ func (p *PBFT) handleCommit(block *blockchain.Block, nodeID string) error {
 	if state.CommitCount >= threshold && !state.Committed {
 		state.Committed = true
 		utils.LogInfo("Block %s committed with %d votes", block.Hash, state.CommitCount)
-		p2p.LogPBFTConsensusReached(p.NodeID, block.Hash, time.Duration(0)) // New log call
+		p.Logger.LogPBFTConsensusReached(p.NodeID, block.Hash, time.Duration(0)) // New log call
 
 		// The block can now be added to the blockchain
 		return nil
@@ -202,7 +207,7 @@ func (p *PBFT) handleCommit(block *blockchain.Block, nodeID string) error {
 }
 
 // handleViewChange processes a view change message
-func (p *PBFT) handleViewChange(message *Message) error {
+func (p *PBFT) handleViewChange(message *consensus_types.Message) error {
 	viewData, ok := message.Data.(map[string]interface{})
 	if !ok {
 		return fmt.Errorf("invalid view change data format")
@@ -238,7 +243,7 @@ func (p *PBFT) handleViewChange(message *Message) error {
 		p.View = viewInt
 		p.Primary = p.Validators[p.View%len(p.Validators)]
 		utils.LogInfo("View changed to %d. New primary: %s", p.View, p.Primary)
-		p2p.LogPBFTViewChange(p.NodeID, fmt.Sprintf("%d", p.View), time.Duration(0)) // New log call
+		p.Logger.LogPBFTViewChange(p.NodeID, fmt.Sprintf("%d", p.View), time.Duration(0)) // New log call
 	}
 
 	return nil
@@ -257,7 +262,7 @@ func (p *PBFT) InitiateViewChange() error {
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	}
 
-	message := &Message{
+	message := &consensus_types.Message{ // Changed to consensus_types.Message
 		Type:   "ViewChange",
 		NodeID: p.NodeID,
 		Data:   viewChangeData,
@@ -277,7 +282,10 @@ func (p *PBFT) InitiateViewChange() error {
 		utils.LogError("PBFT: Error marshalling ViewChange message: %v", err)
 		return err // Or handle error appropriately
 	}
-	p2p.BroadcastPBFTMessage(jsonData)
+	if err := p.Broadcaster.BroadcastPBFTMessage(jsonData); err != nil {
+		utils.LogError("PBFT: Error broadcasting ViewChange message: %v", err)
+		// Handle error appropriately, e.g., retry or log
+	}
 
 	return nil
 }
@@ -290,7 +298,7 @@ func (p *PBFT) BroadcastPrepare(block *blockchain.Block) error {
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	}
 
-	message := &Message{
+	message := &consensus_types.Message{ // Changed to consensus_types.Message
 		Type:      "Prepare",
 		NodeID:    p.NodeID,
 		BlockHash: block.Hash,
@@ -309,7 +317,10 @@ func (p *PBFT) BroadcastPrepare(block *blockchain.Block) error {
 		utils.LogError("PBFT: Error marshalling Prepare message: %v", err)
 		return err // Or handle error appropriately
 	}
-	p2p.BroadcastPBFTMessage(jsonData)
+	if err := p.Broadcaster.BroadcastPBFTMessage(jsonData); err != nil {
+		utils.LogError("PBFT: Error broadcasting Prepare message: %v", err)
+		// Handle error appropriately
+	}
 
 	return nil
 }
@@ -322,7 +333,7 @@ func (p *PBFT) BroadcastCommit(block *blockchain.Block) error {
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	}
 
-	message := &Message{
+	message := &consensus_types.Message{ // Changed to consensus_types.Message
 		Type:      "Commit",
 		NodeID:    p.NodeID,
 		BlockHash: block.Hash,
@@ -341,7 +352,10 @@ func (p *PBFT) BroadcastCommit(block *blockchain.Block) error {
 		utils.LogError("PBFT: Error marshalling Commit message: %v", err)
 		return err // Or handle error appropriately
 	}
-	p2p.BroadcastPBFTMessage(jsonData)
+	if err := p.Broadcaster.BroadcastPBFTMessage(jsonData); err != nil {
+		utils.LogError("PBFT: Error broadcasting Commit message: %v", err)
+		// Handle error appropriately
+	}
 
 	return nil
 }
@@ -357,6 +371,6 @@ func (p *PBFT) GetValidators() []string {
 }
 
 // GetType returns the type of consensus algorithm
-func (p *PBFT) GetType() ConsensusType {
-	return "PBFT"
+func (p *PBFT) GetType() consensus_types.ConsensusType { // Changed to consensus_types.ConsensusType
+	return consensus_types.ConsensusType("PBFT")
 }

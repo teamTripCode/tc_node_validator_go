@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"tripcodechain_go/blockchain"
-	"tripcodechain_go/consensus"
+	"tripcodechain_go/pkg/validation"
 	"tripcodechain_go/utils"
 )
 
@@ -132,7 +132,7 @@ func (s *Server) OriginalRegisterNodeHandler(w http.ResponseWriter, r *http.Requ
 		// For now, we assume reqBody.Address can be used directly if it's the key in DPoS.Validators map.
 		// This might need adjustment if DPoS keys are LibP2P Peer IDs or public keys.
 		// Assuming validatorAddress for VerifyValidatorEligibility IS the HTTP address for now.
-		eligible, err := consensus.VerifyValidatorEligibility(s.DPoS, reqBody.Address)
+		eligible, err := validation.VerifyValidatorEligibility(s.DPoS, reqBody.Address)
 		if err != nil {
 			utils.LogError("OriginalRegisterNodeHandler: Error verifying validator eligibility for %s: %v", reqBody.Address, err)
 			http.Error(w, "Error verifying validator eligibility", http.StatusInternalServerError)
@@ -798,7 +798,7 @@ func (s *Server) HeartbeatHandler(w http.ResponseWriter, r *http.Request) {
 		utils.LogInfo("Validator %s from heartbeat (sender: %s) is new. Verifying eligibility.",
 			reportedValidatorStatus.Address, payload.NodeID)
 
-		eligible, err := consensus.VerifyValidatorEligibility(s.DPoS, reportedValidatorStatus.Address)
+		eligible, err := validation.VerifyValidatorEligibility(s.DPoS, reportedValidatorStatus.Address)
 		if err != nil {
 			utils.LogError("Error verifying eligibility for %s (from heartbeat by %s): %v",
 				reportedValidatorStatus.Address, payload.NodeID, err)

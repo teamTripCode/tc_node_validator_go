@@ -9,7 +9,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"tripcodechain_go/consensus" // Added for consensus interface and types
+	"tripcodechain_go/consensus"      // Still needed for consensus.Consensus and consensus.PBFT
+	"tripcodechain_go/pkg/consensus_types" // Added for consensus_types.Message
 	"tripcodechain_go/utils"
 )
 
@@ -76,7 +77,7 @@ func pbftWsHandler(w http.ResponseWriter, r *http.Request, serverNodeID string, 
 			break
 		}
 
-		var msg consensus.Message
+		var msg consensus_types.Message // Changed to consensus_types.Message
 		if err := json.Unmarshal(messageBytes, &msg); err != nil {
 			utils.LogError("[PBFT_WS] Failed to unmarshal PBFT message from %s: %v. Message: %s", r.RemoteAddr, err, string(messageBytes))
 			continue

@@ -2,7 +2,7 @@ package contracts
 
 import (
 	"errors"
-	"tripcodechain_go/consensus"
+	"tripcodechain_go/pkg/validation" // Changed import
 	"tripcodechain_go/utils" // Added for LogInfo in placeholder methods
 )
 
@@ -17,13 +17,13 @@ func NewValidatorContract() *ValidatorContract {
 
 // Register allows a caller to register as a validator in the DPoS system
 // by interacting with this contract.
-func Register(contract *ValidatorContract, dpos *consensus.DPoS, callerAddress string, stakeAmount uint64) error {
+func Register(contract *ValidatorContract, dpos *validation.DPoS, callerAddress string, stakeAmount uint64) error { // Changed dpos type
 	// Call the underlying DPoS registration logic
-	// Note: The RegisterValidator function in consensus/dpos.go is not a method of DPoS struct.
-	// It should be called as consensus.RegisterValidator(dpos, callerAddress, stakeAmount).
-	err := consensus.RegisterValidator(dpos, callerAddress, stakeAmount)
+	// Note: The RegisterValidator function is now in pkg/validation.
+	// It should be called as validation.RegisterValidator(dpos, callerAddress, stakeAmount).
+	err := validation.RegisterValidator(dpos, callerAddress, stakeAmount) // Changed to validation.RegisterValidator
 	if err != nil {
-		utils.LogError("ValidatorContract.Register: Error calling consensus.RegisterValidator for %s: %v", callerAddress, err)
+		utils.LogError("ValidatorContract.Register: Error calling validation.RegisterValidator for %s: %v", callerAddress, err)
 		return err
 	}
 	utils.LogInfo("ValidatorContract.Register: Successfully registered validator %s with stake %d", callerAddress, stakeAmount)
@@ -31,14 +31,14 @@ func Register(contract *ValidatorContract, dpos *consensus.DPoS, callerAddress s
 }
 
 // UpdateStake is a placeholder for updating a validator's stake.
-func UpdateStake(contract *ValidatorContract, dpos *consensus.DPoS, callerAddress string, newStakeAmount uint64) error {
+func UpdateStake(contract *ValidatorContract, dpos *validation.DPoS, callerAddress string, newStakeAmount uint64) error { // Changed dpos type
 	utils.LogInfo("ValidatorContract.UpdateStake called by %s with new stake %d. (Not yet implemented)", callerAddress, newStakeAmount)
 	return errors.New("UpdateStake not yet implemented")
 }
 
 // Slash is a placeholder for slashing a validator's stake through the contract.
 // Currently, slashing is handled internally by DPoS logic.
-func Slash(contract *ValidatorContract, dpos *consensus.DPoS, targetAddress string, penaltyPercentage float64, reason string) error {
+func Slash(contract *ValidatorContract, dpos *validation.DPoS, targetAddress string, penaltyPercentage float64, reason string) error { // Changed dpos type
 	utils.LogInfo("ValidatorContract.Slash called for %s with penalty %f%% for reason: %s. (Not yet implemented via contract)", targetAddress, penaltyPercentage*100, reason)
 	return errors.New("Slash not yet implemented via contract, use DPoS internal functions")
 }
