@@ -444,12 +444,172 @@ func (n *Node) getNodeStatusFromHttp(httpPeerAddress string) (*NodeStatus, error
 	return &status, nil
 }
 
+<<<<<<< HEAD
 func (n *Node) RegisterWithNode(seedNodeAddress string, libp2pBootstrapPeers []string) { /* ... unchanged ... */
 }
 
 func (n *Node) AddNode(address string)                      { /* ... unchanged ... */ }
 func (n *Node) GetKnownNodes() []string                     { /* ... unchanged ... */ return nil }
 func (n *Node) GetDiscoveredPeersWithStatus() []*NodeStatus { /* ... unchanged ... */ return nil }
+=======
+func (n *Node) getNodePeers(nodeAddress string) ([]*NodeStatus, error) {
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://%s/nodes", nodeAddress))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var peers []*NodeStatus
+	if err := json.NewDecoder(resp.Body).Decode(&peers); err != nil {
+		return nil, err
+	}
+	return peers, nil
+}
+
+func (n *Node) RegisterWithNode(seedNodeAddress string, libp2pBootstrapPeers []string) {
+	utils.LogInfo("Initiating registration process with seed node: %s", seedNodeAddress)
+
+	if n.NodeType == "" || n.NodeType == "unknown" {
+		// Defaulting NodeType if not set. This should ideally be set during node initialization.
+		// For the purpose of this implementation, let's assume a default or log a warning.
+		utils.LogInfo("WARN: Node type is not explicitly set or is 'unknown'. Defaulting to 'node' for registration.")
+		// n.NodeType = "node" // Or handle as an error, depending on desired behavior.
+		// For now, we'll proceed with whatever n.NodeType is, but this is a point of attention.
+	}
+
+	registrationPayload := NodeRegistrationRequest{
+		Address:  n.ID,
+		NodeType: n.NodeType,
+	}
+
+	requestBodyBytes, err := json.Marshal(registrationPayload)
+	if err != nil {
+		utils.LogError("Failed to marshal NodeRegistrationRequest payload: %v", err)
+		return
+	}
+
+	utils.LogInfo("Registering with NodeType: %s", n.NodeType)
+	// Attempt registration once. Retry logic could be added here or be the responsibility of the caller.
+	// The attemptHttpRegistration function already takes an 'attempt' parameter,
+	// so multiple calls could be wrapped here if needed.
+	// For now, a single attempt is made.
+	if success := n.attemptHttpRegistration(seedNodeAddress, requestBodyBytes, 1); success {
+		utils.LogInfo("Registration attempt with %s was successful.", seedNodeAddress)
+		// Peer processing is handled within attemptHttpRegistration
+	} else {
+		utils.LogInfo("Registration attempt with %s failed.", seedNodeAddress)
+		// Consider if any specific fallback or error handling is needed here.
+	}
+
+	// Handle libp2pBootstrapPeers - TBD
+	if len(libp2pBootstrapPeers) > 0 {
+		utils.LogInfo("LibP2P bootstrap peers provided but not yet handled in RegisterWithNode: %v", libp2pBootstrapPeers)
+		// TODO: Implement logic to add these peers to the DHT bootstrap list if distinct from HTTP registered peers.
+		// This might involve calling n.BootstrapDHT(libp2pBootstrapPeers) or a similar mechanism.
+	}
+}
+
+func (n *Node) attemptHttpRegistration(seedNodeAddress string, requestBodyBytes []byte, attempt int) bool {
+	utils.LogInfo("Attempting HTTP registration (attempt %d) with seed node %s", attempt, seedNodeAddress)
+	client := &http.Client{Timeout: 10 * time.Second}
+	url := fmt.Sprintf("http://%s/register", seedNodeAddress)
+
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(requestBodyBytes))
+	if err != nil {
+		utils.LogError("Failed to create registration request for %s: %v", seedNodeAddress, err)
+		return false
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		utils.LogError("Failed to send registration request to %s (attempt %d): %v", seedNodeAddress, attempt, err)
+		return false
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		utils.LogError("Registration with %s failed (attempt %d): status %s", seedNodeAddress, attempt, resp.Status)
+		// TODO: It might be useful to read and log the body for non-OK responses for debugging.
+		return false
+	}
+
+	var receivedPeers []NodeStatus
+	if err := json.NewDecoder(resp.Body).Decode(&receivedPeers); err != nil {
+		utils.LogError("Failed to decode registration response from %s (attempt %d): %v", seedNodeAddress, attempt, err)
+		return false
+	}
+
+	utils.LogInfo("Successfully registered with %s (attempt %d). Received %d peers.", seedNodeAddress, attempt, len(receivedPeers))
+	for _, peerStatus := range receivedPeers {
+		if peerStatus.Address == n.ID { // Don't add self
+			continue
+		}
+		utils.LogInfo("Discovered peer %s (type: %s) via registration with %s", peerStatus.Address, peerStatus.NodeType, seedNodeAddress)
+		// Assuming AddNodeStatus handles metrics like ValidatorsAdded internally if applicable
+		n.AddNodeStatus(peerStatus)
+	}
+	return true
+}
+
+// AddNode ensures a node with the given address is in knownNodes.
+// If the node is not already known, it adds it with a default NodeType "general_peer".
+// It leverages n.AddNodeStatus for the actual addition and associated logic.
+func (n *Node) AddNode(address string) {
+	if address == n.ID {
+		utils.LogDebug("Attempted to add self (%s) via AddNode, skipping.", address)
+		return
+	}
+
+	// Log the intent before calling AddNodeStatus, as AddNodeStatus has its own detailed logging.
+	utils.LogInfo("Attempting to add node %s via AddNode utility with default type 'general_peer'.", address)
+	n.AddNodeStatus(NodeStatus{Address: address, NodeType: "general_peer"})
+}
+
+// GetKnownNodes returns a slice of addresses of all known nodes.
+// It is thread-safe.
+func (n *Node) GetKnownNodes() []string {
+	n.mutex.RLock()
+	defer n.mutex.RUnlock()
+
+	if len(n.knownNodes) == 0 {
+		return []string{} // Return empty slice, not nil
+	}
+
+	addresses := make([]string, 0, len(n.knownNodes))
+	for address := range n.knownNodes {
+		addresses = append(addresses, address)
+	}
+	return addresses
+}
+
+// GetDiscoveredPeersWithStatus returns a copy of the slice of discovered peers with their statuses.
+// It is thread-safe.
+func (n *Node) GetDiscoveredPeersWithStatus() []*NodeStatus {
+	n.discoveredPeersMutex.Lock()
+	defer n.discoveredPeersMutex.Unlock()
+
+	if n.discoveredPeersWithStatus == nil || len(n.discoveredPeersWithStatus) == 0 {
+		return []*NodeStatus{} // Return empty slice, not nil
+	}
+
+	// Return a copy of the slice to prevent external modification
+	copiedSlice := make([]*NodeStatus, len(n.discoveredPeersWithStatus))
+	for i, status := range n.discoveredPeersWithStatus {
+		// If NodeStatus is a pointer to a struct, and you want to prevent modification
+		// of the structs themselves, you'd need a deep copy here.
+		// Assuming NodeStatus itself is a struct or its fields are value types,
+		// a shallow copy of the pointers is usually what's intended when copying a slice of pointers.
+		// The prompt implies copying the slice, not deep copying each element.
+		copiedSlice[i] = status
+	}
+	// A more idiomatic way to copy the slice if NodeStatus pointers are fine:
+	// copiedSlice := make([]*NodeStatus, len(n.discoveredPeersWithStatus))
+	// copy(copiedSlice, n.discoveredPeersWithStatus)
+
+	return copiedSlice
+}
+>>>>>>> 6ce56344460a39f18f25b74e5af1c11fc2093194
 
 func (n *Node) StopLibp2pServices() {
 	if n.metricsTicker != nil {
@@ -487,14 +647,134 @@ func (n *Node) StopLibp2pServices() {
 	utils.LogInfo("LibP2P services stopped for node %s", n.ID)
 }
 
-func (n *Node) BootstrapDHT(bootstrapPeerAddrs []string) error { /* ... unchanged, uses p2pCtx ... */
+func (n *Node) BootstrapDHT(bootstrapPeerAddrs []string) error {
+	utils.LogInfo("Starting DHT bootstrapping process...")
+	if n.Libp2pHost == nil || n.KadDHT == nil {
+		errMsg := "LibP2P host or Kademlia DHT not initialized"
+		utils.LogError(errMsg)
+		return errors.New(errMsg)
+	}
+
+	if len(bootstrapPeerAddrs) == 0 {
+		utils.LogInfo("No bootstrap peers provided. DHT will rely on other discovery mechanisms if available.")
+		// Attempting bootstrap even with no peers, as KadDHT might have persisted some from previous runs or other sources.
+		if err := n.KadDHT.Bootstrap(n.p2pCtx); err != nil {
+			utils.LogError("DHT bootstrap call failed: %v", err)
+			return fmt.Errorf("dht bootstrap failed: %w", err)
+		}
+		utils.LogInfo("DHT bootstrap process completed (no explicit peers to connect to).")
+		return nil
+	}
+
+	var wg sync.WaitGroup
+	connectedPeers := 0
+
+	utils.LogInfo("Attempting to connect to %d bootstrap peers:", len(bootstrapPeerAddrs))
+	for _, addrStr := range bootstrapPeerAddrs {
+		if addrStr == "" {
+			continue
+		}
+		maddr, err := multiaddr.NewMultiaddr(addrStr)
+		if err != nil {
+			utils.LogError("Failed to parse multiaddr '%s': %v", addrStr, err)
+			continue
+		}
+
+		pi, err := peer.AddrInfoFromP2pAddr(maddr)
+		if err != nil {
+			utils.LogError("Failed to create AddrInfo from multiaddr '%s': %v", maddr, err)
+			continue
+		}
+
+		if pi.ID == n.Libp2pHost.ID() {
+			utils.LogInfo("Skipping connection to self: %s", pi.ID)
+			continue
+		}
+
+		wg.Add(1)
+		go func(peerInfo peer.AddrInfo) {
+			defer wg.Done()
+			utils.LogInfo("Connecting to bootstrap peer: %s", peerInfo.ID.String())
+			// Use a derived context for individual connection attempts if specific timeouts per peer are needed.
+			// For now, using n.p2pCtx directly means the node's global context governs cancellation.
+			err := n.Libp2pHost.Connect(n.p2pCtx, peerInfo)
+			if err != nil {
+				utils.LogInfo("WARN: Failed to connect to bootstrap peer %s: %v", peerInfo.ID.String(), err)
+			} else {
+				utils.LogInfo("Successfully connected to bootstrap peer: %s", peerInfo.ID.String())
+				// Optional: Explicitly add to DHT routing table.
+				// n.KadDHT.RoutingTable().TryAddPeer(peerInfo.ID, true, false) // true for query, false for replace
+				// However, successful connection should add it to the Peerstore, which DHT uses.
+				// The Bootstrap call later is more crucial for learning.
+				connectedPeers++ // This needs to be thread-safe if we want an exact count here.
+				// For simplicity, we'll rely on the log messages and overall bootstrap call.
+			}
+		}(*pi) // Pass by value if pi is reused in loop, though AddrInfoFromP2pAddr creates new.
+	}
+
+	wg.Wait()
+	utils.LogInfo("Finished connection attempts to bootstrap peers. %d peers potentially connected (see logs for details).", connectedPeers) // This count is approximate due to potential races if not properly mutexed.
+
+	utils.LogInfo("Performing KadDHT Bootstrap call...")
+	if err := n.KadDHT.Bootstrap(n.p2pCtx); err != nil {
+		utils.LogError("DHT bootstrap call failed: %v", err)
+		return fmt.Errorf("dht bootstrap failed: %w", err)
+	}
+
+	utils.LogInfo("DHT bootstrapping process completed.")
 	return nil
 }
 
+<<<<<<< HEAD
 func (n *Node) AdvertiseAsValidator() { /* ... unchanged, uses p2pCtx ... */ }
 
 func (n *Node) FindValidatorsDHT() (<-chan peer.AddrInfo, error) { /* ... unchanged, uses p2pCtx ... */
 	return nil, nil
+=======
+func (n *Node) AdvertiseAsValidator() {
+	utils.LogInfo("Attempting to advertise self as a validator via DHT...")
+	if n.routingDiscovery == nil {
+		utils.LogError("Cannot advertise validator: Routing Discovery service is not initialized.")
+		return
+	}
+	if n.p2pCtx == nil {
+		utils.LogError("Cannot advertise validator: p2pCtx is nil.")
+		return
+	}
+
+	// The Advertise function typically starts a background process.
+	// It doesn't usually return an error for the setup itself, but might log errors internally if things go wrong during announcement.
+	routing.Advertise(n.p2pCtx, n.routingDiscovery, ValidatorServiceTag)
+
+	// It's important to also ensure the DHT is in server mode and the host is listening.
+	// These are typically set up during NewNode.
+	utils.LogInfo("Initiated advertising self as a validator using service tag: %s. This runs periodically.", ValidatorServiceTag)
+}
+
+func (n *Node) FindValidatorsDHT() (<-chan peer.AddrInfo, error) {
+	utils.LogInfo("Starting to find validators via DHT using service tag: %s", ValidatorServiceTag)
+	if n.routingDiscovery == nil {
+		errMsg := "cannot find validators: Routing Discovery service is not initialized"
+		utils.LogError(errMsg)
+		return nil, errors.New(errMsg)
+	}
+	if n.p2pCtx == nil {
+		errMsg := "cannot find validators: p2pCtx is nil"
+		utils.LogError(errMsg)
+		return nil, errors.New(errMsg)
+	}
+
+	// FindPeers returns a channel that will provide peer information.
+	// The actual discovery happens in the background.
+	peerChan, err := n.routingDiscovery.FindPeers(n.p2pCtx, ValidatorServiceTag)
+	if err != nil {
+		utils.LogError("Failed to start FindPeers for service tag '%s': %v", ValidatorServiceTag, err)
+		return nil, fmt.Errorf("FindPeers failed for tag '%s': %w", ValidatorServiceTag, err)
+	}
+
+	utils.LogInfo("Peer discovery process for validators started. Peers will be emitted on the returned channel.")
+	return peerChan, nil
+>>>>>>> 6ce56344460a39f18f25b74e5af1c11fc2093194
 }
 
 func (n *Node) GetOrInitializeReputation(address string) *PeerReputation {
@@ -930,7 +1210,34 @@ func (n *Node) periodicallyPublishValidators() {
 	}
 }
 
-func (n *Node) StorePeerValidatorView(peerHttpAddress string, validators []NodeStatus) { /* ... unchanged ... */
+// StorePeerValidatorView stores the list of validators reported by a specific peer.
+// This data is used for network partition detection.
+func (n *Node) StorePeerValidatorView(peerHttpAddress string, validators []NodeStatus) {
+	n.partitionCheckMutex.Lock()
+	defer n.partitionCheckMutex.Unlock()
+
+	// Safeguard: Initialize the map if it's nil.
+	// This should ideally be done in NewNode, but this prevents a panic if it wasn't.
+	if n.peerValidatorViews == nil {
+		utils.LogInfo("WARN: peerValidatorViews map was nil. Initializing now.")
+		n.peerValidatorViews = make(map[string][]NodeStatus)
+	}
+
+	if peerHttpAddress == "" {
+		utils.LogInfo("WARN: Attempted to store validator view with an empty peerHttpAddress. Skipping.")
+		return
+	}
+
+	// Store the received validator list.
+	// If validators is nil, it will store a nil slice, which is fine for clearing a view.
+	// If validators is empty, it will store an empty slice.
+	n.peerValidatorViews[peerHttpAddress] = validators
+
+	if validators == nil {
+		utils.LogInfo("Cleared validator view for peer %s.", peerHttpAddress)
+	} else {
+		utils.LogInfo("Stored validator view from peer %s with %d validators.", peerHttpAddress, len(validators))
+	}
 }
 
 func (n *Node) checkForNetworkPartition() {
