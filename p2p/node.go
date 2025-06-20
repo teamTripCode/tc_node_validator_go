@@ -17,7 +17,7 @@ import (
 
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
-	"github.com/libp2p/go-libp2p-pubsub"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/p2p/discovery/routing"
@@ -460,6 +460,7 @@ func (n *Node) getNodePeers(nodeAddress string) ([]*NodeStatus, error) {
 
 func (n *Node) RegisterWithNode(seedNodeAddress string, libp2pBootstrapPeers []string) { /* ... unchanged ... */
 }
+
 func (n *Node) attemptHttpRegistration(seedNodeAddress string, requestBodyBytes []byte, attempt int) bool { /* ... unchanged ... */
 	return true
 }

@@ -213,8 +213,8 @@ func main() {
 		// Note: node.defaultBootstrapPeers are the ones from initialBootstrapPeers
 		if config.SeedNodesStr != "" {
 			utils.LogInfo("Registering with HTTP seed nodes from %s: %s", "config", config.SeedNodesStr)
-			seedsSlice := strings.Split(config.SeedNodesStr, ",")
-			for _, seed := range seedsSlice {
+			seedsSlice := strings.SplitSeq(config.SeedNodesStr, ",")
+			for seed := range seedsSlice {
 				trimmedSeed := strings.TrimSpace(seed)
 				if trimmedSeed != "" {
 					utils.LogInfo("Attempting to register with seed node %s (HTTP) and bootstrap DHT", trimmedSeed)
