@@ -13,7 +13,7 @@ spec:
   - Ingress
   - Egress
   ingress:
-  # Permitir comunicación P2P entre nodos validadores
+  # Permitir comunicacion P2P entre nodos validadores
   - from:
     - podSelector:
         matchLabels:
@@ -23,16 +23,24 @@ spec:
       port: 3001
     - protocol: TCP
       port: 3002
+    - protocol: TCP
+      port: 3003
   # Permitir acceso API externo
   - ports:
     - protocol: TCP
       port: 3002
-  # Permitir acceso a métricas
+  # Permitir acceso MCP externo
+  - ports:
+    - protocol: TCP
+      port: 3003
+  # Permitir acceso a metricas
   - ports:
     - protocol: TCP
       port: 9090
+    - protocol: TCP
+      port: 9091
   egress:
-  # Permitir comunicación entre nodos validadores
+  # Permitir comunicacion entre nodos validadores
   - to:
     - podSelector:
         matchLabels:
@@ -42,6 +50,8 @@ spec:
       port: 3001
     - protocol: TCP
       port: 3002
+    - protocol: TCP
+      port: 3003
   # Permitir DNS
   - to: []
     ports:
@@ -49,13 +59,15 @@ spec:
       port: 53
     - protocol: TCP
       port: 53
-  # Permitir conexión al seed node
+  # Permitir conexion al seed node
   - to: []
     ports:
     - protocol: TCP
       port: 3000
-  # Permitir HTTPS para registry
+  # Permitir HTTPS para registry y APIs externas
   - to: []
     ports:
     - protocol: TCP
       port: 443
+    - protocol: TCP
+      port: 80

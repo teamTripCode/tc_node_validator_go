@@ -1,8 +1,6 @@
 package p2p
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -14,13 +12,17 @@ import (
 	"time"
 
 	"tripcodechain_go/blockchain"
+	"tripcodechain_go/consensus"
 	"tripcodechain_go/utils"
-	// "tripcodechain_go/p2p/node" // Not explicitly needed if NodeInfo is only used by NodeManager
 )
 
 // RequestBodyForRegisterNode is used to parse the JSON request for registering a node.
 type RequestBodyForRegisterNode struct {
 	Address string `json:"address"`
+}
+
+type SeedNode struct {
+	nodeManager NodeManager
 }
 
 // RegisterNodeHandler returns an http.HandlerFunc for registering a new node.
@@ -84,51 +86,76 @@ func GetActiveNodesHandler(nodeManager *NodeManager) http.HandlerFunc {
 	}
 }
 
-type SeedNode struct {
-	nodeManager NodeManager
-}
-
-// GetNodesHandler returns the list of known nodes
-// This is the original GetNodesHandler, kept for now.
-// It might need to be updated or removed if it conflicts with GetActiveNodesHandler's purpose.
+// GetNodesHandler returns the list of known node statuses (address and type).
 func (s *Server) GetNodesHandler(w http.ResponseWriter, r *http.Request) {
-	nodes := s.Node.GetKnownNodes()
+	statuses := s.Node.GetKnownNodeStatuses() // This new method returns []NodeStatus
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(nodes)
+	if err := json.NewEncoder(w).Encode(statuses); err != nil {
+		utils.LogError("GetNodesHandler: Error encoding node statuses: %v", err)
+		http.Error(w, "Error encoding response", http.StatusInternalServerError)
+	}
 }
 
 // OriginalRegisterNodeHandler handles node registration requests for the Server struct.
-// Renamed to avoid conflict with the new RegisterNodeHandler that uses NodeManager.
+// It now expects a NodeRegistrationRequest containing Address and NodeType.
+// It also verifies validator eligibility if NodeType is "validator".
 func (s *Server) OriginalRegisterNodeHandler(w http.ResponseWriter, r *http.Request) {
-	var node string
-	if err := json.NewDecoder(r.Body).Decode(&node); err != nil {
-		http.Error(w, "Invalid node format", http.StatusBadRequest)
-		utils.LogError("Invalid node registration format: %v", err)
+	var reqBody NodeRegistrationRequest // Use p2p.NodeRegistrationRequest from node.go
+	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+		http.Error(w, "Invalid request body format for node registration: "+err.Error(), http.StatusBadRequest)
+		utils.LogError("OriginalRegisterNodeHandler: Invalid node registration format: %v", err)
 		return
 	}
 
 	// Validate node address format
-	if !isValidNodeAddress(node) {
-		http.Error(w, "Invalid node address format", http.StatusBadRequest)
-		utils.LogError("Invalid node address: %s", node)
+	if !isValidNodeAddress(reqBody.Address) {
+		http.Error(w, "Invalid node address format: "+reqBody.Address, http.StatusBadRequest)
+		utils.LogError("OriginalRegisterNodeHandler: Invalid node address: %s", reqBody.Address)
 		return
 	}
 
-	// Check if node is responsive before adding
-	if isPingable(node) {
-		if s.Node.AddNode(node) {
-			utils.LogInfo("New node registered: %s", node)
-			w.WriteHeader(http.StatusCreated)
-		} else {
-			utils.LogInfo("Node already registered: %s", node)
-			w.WriteHeader(http.StatusOK)
-		}
+	if reqBody.Address == s.Node.ID { // Assuming s.Node.ID is the HTTP address
+		http.Error(w, "Cannot register self", http.StatusBadRequest)
+		utils.LogInfo("OriginalRegisterNodeHandler: Attempt to register self from %s", reqBody.Address)
+		return
+	}
 
-		// Immediately sync with the new node
-		go s.syncWithNode(node)
+	// Verify eligibility if the node claims to be a validator
+	if reqBody.NodeType == "validator" {
+		if s.DPoS == nil {
+			utils.LogError("OriginalRegisterNodeHandler: DPoS service is not available on the server to verify validator eligibility.")
+			http.Error(w, "Cannot verify validator eligibility: DPoS service unavailable", http.StatusInternalServerError)
+			return
+		}
+		// reqBody.Address is the HTTP address (e.g., localhost:3001)
+		// VerifyValidatorEligibility expects the underlying consensus address/ID.
+		// For now, we assume reqBody.Address can be used directly if it's the key in DPoS.Validators map.
+		// This might need adjustment if DPoS keys are LibP2P Peer IDs or public keys.
+		// Assuming validatorAddress for VerifyValidatorEligibility IS the HTTP address for now.
+		eligible, err := consensus.VerifyValidatorEligibility(s.DPoS, reqBody.Address)
+		if err != nil {
+			utils.LogError("OriginalRegisterNodeHandler: Error verifying validator eligibility for %s: %v", reqBody.Address, err)
+			http.Error(w, "Error verifying validator eligibility", http.StatusInternalServerError)
+			return
+		}
+		if !eligible {
+			utils.LogInfo("OriginalRegisterNodeHandler: Node %s (type: %s) failed eligibility check.", reqBody.Address, reqBody.NodeType)
+			http.Error(w, "Node not eligible to be a validator", http.StatusForbidden) // Or http.StatusBadRequest
+			return
+		}
+		utils.LogInfo("OriginalRegisterNodeHandler: Node %s successfully verified as eligible validator.", reqBody.Address)
+	}
+
+	// Check if node is responsive before adding
+	if isPingable(reqBody.Address) {
+		s.Node.AddNodeStatus(NodeStatus{Address: reqBody.Address, NodeType: reqBody.NodeType})
+		s.Node.UpdatePeerLastSeen(reqBody.Address) // Update last seen on successful registration processing
+		w.WriteHeader(http.StatusOK)
+		utils.LogInfo("Node %s (type: %s) processed for registration.", reqBody.Address, reqBody.NodeType)
+		go s.syncWithNode(reqBody.Address) // Sync with the node
 	} else {
-		http.Error(w, "Node not reachable", http.StatusBadRequest)
-		utils.LogError("Failed to register unreachable node: %s", node)
+		http.Error(w, "Node not reachable for registration: "+reqBody.Address, http.StatusBadRequest)
+		utils.LogError("OriginalRegisterNodeHandler: Failed to register unreachable node: %s", reqBody.Address)
 	}
 }
 
@@ -165,19 +192,33 @@ func isValidNodeAddress(addr string) bool {
 }
 
 // verifyNodeSignature verifies a block signature from a node
+// TODO: This will need to be updated to use asymmetric crypto and the sender's public key.
 func (s *Server) verifyNodeSignature(blockHash, signature, nodeID string) bool {
-	// In a real implementation, you would verify using the node's public key
-	// This is a simplified placeholder implementation
-	expectedSig := fmt.Sprintf("signed(%s, %s)", blockHash, s.Node.PrivateKey)
-	return signature == expectedSig
+	// For now, this is a placeholder. Proper implementation requires:
+	// 1. Getting the public key for nodeID.
+	// 2. Decoding the hex signature.
+	// 3. Verifying the signature against the blockHash (or a serialized form of the block).
+	// This is a simplified placeholder implementation using the old HMAC logic for structure.
+	// It will not work correctly with the new Ed25519 signing.
+	// This function should be updated in a subsequent task related to block validation.
+	utils.LogInfo("WARN: verifyNodeSignature is a placeholder and needs updating for asymmetric crypto.")
+	// This is NOT a correct verification for Ed25519:
+	// expectedSig := fmt.Sprintf("signed(%s, %s)", blockHash, "placeholder_key_for_node_"+nodeID)
+	// return signature == expectedSig
+	return true // Temporarily bypass for now
 }
 
-// signBlock generates a digital signature for a block hash using HMAC-SHA256
-// In production, you should use proper asymmetric cryptography
-func (s *Server) signBlock(hash string, privateKey string) string {
-	h := hmac.New(sha256.New, []byte(privateKey))
-	h.Write([]byte(hash))
-	return hex.EncodeToString(h.Sum(nil))
+// signDataWithNodeSigner signs arbitrary data using the node's Signer.
+// It returns the hex-encoded signature string and an error if signing fails.
+func (s *Server) signDataWithNodeSigner(dataToSign []byte) (string, error) {
+	if s.Node == nil || s.Node.Signer == nil {
+		return "", fmt.Errorf("node or signer not initialized")
+	}
+	signatureBytes, err := s.Node.Signer.Sign(dataToSign)
+	if err != nil {
+		return "", fmt.Errorf("failed to sign data: %w", err)
+	}
+	return hex.EncodeToString(signatureBytes), nil
 }
 
 // syncWithNode synchronizes chains with a specific node
@@ -237,13 +278,25 @@ func (s *Server) syncChainWithNode(chain *blockchain.Blockchain, chainType strin
 func (s *Server) optimizedBroadcastBlock(block *blockchain.Block, chainType string) {
 	message := BlockMessage{
 		Block:  block,
-		NodeID: s.Node.ID,
+		NodeID: s.Node.ID, // This is the HTTP address, e.g. "localhost:3001"
+		// The CryptoID (node.CryptoID) could also be sent if needed for verification by recipient.
 	}
 
-	// Sign the block
-	message.Signature = s.signBlock(block.Hash, s.Node.PrivateKey)
+	// Sign the block's hash
+	hashBytes, err := hex.DecodeString(block.Hash)
+	if err != nil {
+		utils.LogError("Failed to decode block hash for signing: %v", err)
+		return // Do not broadcast if we can't prepare the signature
+	}
 
-	blockData, err := json.Marshal(block)
+	signatureString, err := s.signDataWithNodeSigner(hashBytes)
+	if err != nil {
+		utils.LogError("Failed to sign block for broadcast: %v", err)
+		return // Do not broadcast if signing fails
+	}
+	message.Signature = signatureString // message.Signature is a string (hex-encoded)
+
+	blockData, err := json.Marshal(block) // Marshal the block itself for sending
 	if err != nil {
 		utils.LogError("Failed to marshal block for broadcast: %v", err)
 		return
@@ -367,12 +420,24 @@ func (s *Server) processTxBatch(pendingTxs []interface{}) {
 	block.Transactions = transactions
 	block.TotalFees = s.calculateTotalFees(transactions)
 
-	// Mine the block and add it to the chain
-	startTime := time.Now()
-	block.ForgeBlock(s.Node.ID)
-	endTime := time.Now()
+	// Set Validator *before* ForgeBlock so PoW is on the correct state
+	block.Validator = s.Node.Signer.Address()
 
-	utils.LogInfo("Block mined in %v seconds", endTime.Sub(startTime).Seconds())
+	// Mine the block (PoW)
+	startTime := time.Now()
+	block.ForgeBlock() // ForgeBlock now uses the pre-set b.Validator for hashing
+	endTime := time.Now()
+	utils.LogInfo("Block #%d (tx) forged (PoW) in %v seconds by %s", block.Index, endTime.Sub(startTime).Seconds(), block.Validator)
+
+	// Sign the block
+	err := block.Sign(s.Node.Signer)
+	if err != nil {
+		utils.LogError("Failed to sign new transaction block #%d: %v", block.Index, err)
+		return // Do not add or broadcast if signing fails
+	}
+	utils.LogInfo("Block #%d (tx) signed successfully by %s", block.Index, block.Validator)
+	// block.Hash is the content hash that was signed.
+	// block.Validator and block.Signature are now set.
 
 	if err := s.TxChain.AddBlock(block); err != nil {
 		utils.LogError("Failed to add block to chain: %v", err)
@@ -438,12 +503,24 @@ func (s *Server) processCriticalBatch(pendingCritical []interface{}) {
 	block := s.CriticalChain.CreateBlock()
 	block.CriticalProcesses = criticalProcesses
 
-	// Mine the block and add it to the chain
-	startTime := time.Now()
-	block.ForgeBlock(s.Node.ID)
-	endTime := time.Now()
+	// Set Validator *before* ForgeBlock so PoW is on the correct state
+	block.Validator = s.Node.Signer.Address()
 
-	utils.LogInfo("Block mined in %v seconds", endTime.Sub(startTime).Seconds())
+	// Mine the block (PoW)
+	startTime := time.Now()
+	block.ForgeBlock() // ForgeBlock now uses the pre-set b.Validator for hashing
+	endTime := time.Now()
+	utils.LogInfo("Block #%d (critical) forged (PoW) in %v seconds by %s", block.Index, endTime.Sub(startTime).Seconds(), block.Validator)
+
+	// Sign the block
+	err := block.Sign(s.Node.Signer)
+	if err != nil {
+		utils.LogError("Failed to sign new critical block #%d: %v", block.Index, err)
+		return // Do not add or broadcast if signing fails
+	}
+	utils.LogInfo("Block #%d (critical) signed successfully by %s", block.Index, block.Validator)
+	// block.Hash is the content hash that was signed.
+	// block.Validator and block.Signature are now set.
 
 	if err := s.CriticalChain.AddBlock(block); err != nil {
 		utils.LogError("Failed to add critical block to chain: %v", err)
@@ -480,14 +557,38 @@ func (s *Server) TransactionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Set timestamp if not provided
-	if tx.Timestamp == "" {
-		tx.Timestamp = time.Now().UTC().Format(time.RFC3339)
+	// Set timestamp if not provided by the client; also ensure hash is calculated.
+	if tx.Timestamp == 0 {
+		tx.Timestamp = blockchain.FlexTimestamp(time.Now().Unix())
+		// If timestamp changes, hash might need recalculation if client was supposed to send it.
+		// However, for new transactions, ProcessID might be empty and Hash should be calculated by the node.
+	}
+
+	// Ensure ProcessID is set if it's used as a temporary ID before hashing or for other references.
+	// If Hash is the sole ID, ensure it's calculated.
+	if tx.Hash == "" {
+		newHash, err := tx.CalculateHash()
+		if err != nil {
+			utils.LogError("Error calculating hash for transaction: %v", err)
+			http.Error(w, "Error processing transaction: failed to calculate hash", http.StatusInternalServerError)
+			return
+		}
+		tx.Hash = newHash
+		if tx.ProcessID == "" { // If ProcessID was also empty, can set it to hash or part of it.
+			tx.ProcessID = tx.Hash
+		}
+	}
+
+	// Validate the transaction
+	if err := tx.Validate(); err != nil {
+		utils.LogError("Transaction validation failed: %v", err)
+		http.Error(w, fmt.Sprintf("Transaction validation failed: %s", err.Error()), http.StatusBadRequest)
+		return
 	}
 
 	// Add to mempool
 	s.TxMempool.AddItem(&tx)
-	utils.LogInfo("Transaction added to mempool: %s", tx.ProcessID)
+	utils.LogInfo("Transaction added to mempool: %s (Hash: %s)", tx.ProcessID, tx.Hash)
 
 	// Broadcast to other nodes
 	go s.BroadcastTransaction(&tx)
@@ -505,16 +606,37 @@ func (s *Server) BatchTransactionHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	for _, tx := range txs {
-		// Set timestamp if not provided
-		if tx.Timestamp == "" {
-			tx.Timestamp = time.Now().UTC().Format(time.RFC3339)
+		// Set timestamp if not provided by the client
+		if tx.Timestamp == 0 {
+			tx.Timestamp = blockchain.FlexTimestamp(time.Now().Unix())
+		}
+
+		// Ensure ProcessID and Hash are set
+		if tx.Hash == "" {
+			newHash, err := tx.CalculateHash()
+			if err != nil {
+				utils.LogError("Error calculating hash for batch transaction: %v", err)
+				// Decide if to skip this tx or fail batch. For now, skip.
+				continue
+			}
+			tx.Hash = newHash
+			if tx.ProcessID == "" {
+				tx.ProcessID = tx.Hash
+			}
+		}
+
+		// Validate the transaction
+		if err := tx.Validate(); err != nil {
+			utils.LogError("Batch transaction validation failed for tx %s: %v. Skipping.", tx.Hash, err)
+			// Decide if to skip this tx or fail batch. For now, skip.
+			continue
 		}
 
 		// Add to mempool
 		s.TxMempool.AddItem(tx)
 	}
 
-	utils.LogInfo("Added %d transactions to mempool", len(txs))
+	utils.LogInfo("Processed batch of %d transactions for mempool", len(txs))
 	w.WriteHeader(http.StatusCreated)
 }
 
@@ -620,6 +742,99 @@ func (s *Server) AddTxBlockHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		utils.LogError("Failed to add transaction block #%d from network", block.Index)
 		http.Error(w, "Invalid block", http.StatusBadRequest)
+	}
+}
+
+// HeartbeatHandler processes incoming heartbeat messages.
+func (s *Server) HeartbeatHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST method is allowed for heartbeat", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var payload HeartbeatPayload // Use p2p.HeartbeatPayload from node.go
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "Failed to decode heartbeat payload", http.StatusBadRequest)
+		utils.LogError("Error decoding heartbeat payload from %s: %v", r.RemoteAddr, err)
+		return
+	}
+	defer r.Body.Close()
+
+	utils.LogInfo("Received heartbeat from %s (LibP2P: %s) with %d known validators.",
+		payload.NodeID, payload.Libp2pPeerID, len(payload.KnownValidators))
+
+	// Update last seen time for the sender of the heartbeat
+	if s.Node != nil {
+		s.Node.UpdatePeerLastSeen(payload.NodeID) // payload.NodeID is the HTTP address
+		// Store the received validator view
+		s.Node.StorePeerValidatorView(payload.NodeID, payload.KnownValidators)
+	}
+
+	if s.Node == nil || s.DPoS == nil {
+		utils.LogError("HeartbeatHandler: Node or DPoS not initialized in server.")
+		http.Error(w, "Server not properly configured", http.StatusInternalServerError)
+		return
+	}
+
+	for _, reportedValidatorStatus := range payload.KnownValidators {
+		if reportedValidatorStatus.Address == s.Node.ID { // Don't process self
+			continue
+		}
+		if reportedValidatorStatus.NodeType != "validator" { // Sanity check
+			utils.LogDebug("Skipping non-validator entry %s from heartbeat from %s", reportedValidatorStatus.Address, payload.NodeID)
+			continue
+		}
+
+		// Check if we know this validator already using the new GetKnownNodeStatus method
+		_, exists := s.Node.GetKnownNodeStatus(reportedValidatorStatus.Address)
+
+		if exists {
+			// AddNodeStatus handles updates to existing nodes (e.g. NodeType change or other metadata if tracked)
+			s.Node.AddNodeStatus(reportedValidatorStatus)
+			continue
+		}
+
+		// If not known, verify eligibility
+		utils.LogInfo("Validator %s from heartbeat (sender: %s) is new. Verifying eligibility.",
+			reportedValidatorStatus.Address, payload.NodeID)
+
+		eligible, err := consensus.VerifyValidatorEligibility(s.DPoS, reportedValidatorStatus.Address)
+		if err != nil {
+			utils.LogError("Error verifying eligibility for %s (from heartbeat by %s): %v",
+				reportedValidatorStatus.Address, payload.NodeID, err)
+			continue
+		}
+
+		if eligible {
+			utils.LogInfo("Validator %s (from heartbeat by %s) is eligible. Adding to known nodes.",
+				reportedValidatorStatus.Address, payload.NodeID)
+			s.Node.AddNodeStatus(reportedValidatorStatus) // This will trigger gossip if it's a new validator for this node
+		} else {
+			utils.LogInfo("Validator %s (from heartbeat by %s) is not eligible.",
+				reportedValidatorStatus.Address, payload.NodeID)
+		}
+	}
+
+	w.WriteHeader(http.StatusOK)
+	// fmt.Fprintf(w, "Heartbeat acknowledged from %s", payload.NodeID) // Optional response
+}
+
+// NodeStatusHandler returns the node's status (address and NodeType).
+// This is intended to be used by other nodes to confirm NodeType after discovering via DHT.
+func (s *Server) NodeStatusHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		return
+	}
+
+	status := NodeStatus{ // p2p.NodeStatus
+		Address:  s.Node.ID,       // This is the HTTP address (e.g., localhost:3000)
+		NodeType: s.Node.NodeType, // NodeType (e.g., "validator", "regular")
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(status); err != nil {
+		http.Error(w, "Failed to encode node status", http.StatusInternalServerError)
+		utils.LogError("NodeStatusHandler: Error encoding node status: %v", err)
 	}
 }
 

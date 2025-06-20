@@ -25,7 +25,9 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
+        runAsGroup: 1000
         fsGroup: 1000
+        fsGroupChangePolicy: "OnRootMismatch"
       containers:
       - name: validator-node
         image: foultrip/validator-node:latest
@@ -37,8 +39,14 @@ spec:
         - containerPort: 3002
           name: api
           protocol: TCP
+        - containerPort: 3003
+          name: mcp
+          protocol: TCP
         - containerPort: 9090
           name: metrics
+          protocol: TCP
+        - containerPort: 9091
+          name: mcp-metrics
           protocol: TCP
         env:
         - name: POD_NAME
@@ -53,12 +61,26 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: status.podIP
+        - name: DATA_DIR
+          value: "/app/data"
+        - name: LOG_DIR
+          value: "/app/logs"
+        - name: CONFIG_DIR
+          value: "/app/config"
         - name: P2P_PORT
           value: "3001"
         - name: API_PORT
           value: "3002"
+        - name: MCP_PORT
+          value: "3003"
         - name: METRICS_PORT
           value: "9090"
+        - name: MCP_METRICS_PORT
+          value: "9091"
+        - name: MCP_LOG_LEVEL
+          value: "INFO"
+        - name: MCP_CONFIG_PATH
+          value: "/etc/tripcodechain/mcp/config.json"
         envFrom:
         - configMapRef:
             name: validator-node-config
@@ -66,17 +88,21 @@ spec:
             name: validator-node-secrets
         volumeMounts:
         - name: blockchain-data
-          mountPath: /data
+          mountPath: /app/data
+          subPath: data
         - name: logs
-          mountPath: /var/log/validator-node
+          mountPath: /app/logs
         - name: tmp
-          mountPath: /tmp
+          mountPath: /app/tmp
+        - name: mcp-config-volume
+          mountPath: /etc/tripcodechain/mcp
+          readOnly: true
         readinessProbe:
           httpGet:
             path: /health
             port: 3002
             scheme: HTTP
-          initialDelaySeconds: 30
+          initialDelaySeconds: 45
           periodSeconds: 10
           timeoutSeconds: 5
           failureThreshold: 3
@@ -86,7 +112,7 @@ spec:
             path: /health
             port: 3002
             scheme: HTTP
-          initialDelaySeconds: 60
+          initialDelaySeconds: 90
           periodSeconds: 30
           timeoutSeconds: 5
           failureThreshold: 5
@@ -95,19 +121,19 @@ spec:
             path: /health
             port: 3002
             scheme: HTTP
-          initialDelaySeconds: 10
-          periodSeconds: 5
-          timeoutSeconds: 3
-          failureThreshold: 30
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 20
         resources:
           requests:
             memory: "512Mi"
             cpu: "250m"
             ephemeral-storage: "1Gi"
           limits:
-            memory: "1Gi"
-            cpu: "500m"
-            ephemeral-storage: "2Gi"
+            memory: "2Gi"
+            cpu: "1000m"
+            ephemeral-storage: "4Gi"
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: false
@@ -120,10 +146,14 @@ spec:
       volumes:
       - name: logs
         emptyDir:
-          sizeLimit: 1Gi
+          sizeLimit: 2Gi
       - name: tmp
         emptyDir:
-          sizeLimit: 500Mi
+          sizeLimit: 1Gi
+      - name: mcp-config-volume
+        configMap:
+          name: mcp-config
+          defaultMode: 0644
       nodeSelector:
         kubernetes.io/os: linux
       tolerations:

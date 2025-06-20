@@ -17,6 +17,9 @@ spec:
   - name: api
     port: 3002
     targetPort: 3002
+  - name: mcp
+    port: 3003
+    targetPort: 3003
 ---
 # Servicio externo para acceso desde fuera del cluster
 apiVersion: v1
@@ -44,8 +47,20 @@ spec:
     port: 4003
     targetPort: 3002
     nodePort: 30003
+  - name: mcp-0
+    port: 5001
+    targetPort: 3003
+    nodePort: 30011
+  - name: mcp-1
+    port: 5002
+    targetPort: 3003
+    nodePort: 30012
+  - name: mcp-2
+    port: 5003
+    targetPort: 3003
+    nodePort: 30013
 ---
-# Servicio para métricas
+# Servicio para metricas
 apiVersion: v1
 kind: Service
 metadata:
@@ -61,3 +76,6 @@ spec:
   - name: metrics
     port: 9090
     targetPort: 9090
+  - name: mcp-metrics
+    port: 9091
+    targetPort: 9091

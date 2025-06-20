@@ -1,10 +1,8 @@
-// consensus/dpos.go
 package consensus
 
 import (
 	"fmt"
 	"math/big"
-	"math/rand"
 	"sync"
 	"time"
 
@@ -93,21 +91,6 @@ func (d *DPoS) AddValidator(address string) {
 	if stake.Cmp(minimumStake) >= 0 {
 		d.validators[address] = stake
 	}
-}
-
-func (d *DPoS) selectBlockProducer() string {
-	// El validador con mayor stake produce el bloque
-	var selected string
-	maxStake := big.NewInt(0)
-
-	for addr, stake := range d.validators {
-		if stake.Cmp(maxStake) > 0 {
-			maxStake = stake
-			selected = addr
-		}
-	}
-
-	return selected
 }
 
 // SlashDelegate slashes a delegate based on severity. This is the original SlashValidator function, renamed.
@@ -204,6 +187,62 @@ func (d *DPoS) SlashDelegate(address string, severity string) error {
 	d.UpdateActiveDelegates() // This function might also need review to ensure it works with Validator struct if needed
 
 	return nil
+}
+
+// GetValidatorInfo retrieves the Validator struct for a given address.
+func (d *DPoS) GetValidatorInfo(address string) (Validator, bool) {
+	d.mutex.RLock()
+	defer d.mutex.RUnlock()
+	validator, exists := d.Validators[address]
+	return validator, exists
+}
+
+// VerifyValidatorEligibility checks if a node at validatorAddress is eligible.
+// It checks if the validator is registered, has minimum stake, and is active.
+// For unregistered nodes, it checks if their general balance meets the minimum stake requirement.
+func VerifyValidatorEligibility(dpos *DPoS, validatorAddress string) (bool, error) {
+	if dpos == nil {
+		return false, errors.New("DPoS instance is nil")
+	}
+
+	// 1. Check if validator is already registered and known by DPoS
+	valInfo, exists := dpos.GetValidatorInfo(validatorAddress)
+	if exists {
+		// Already registered, check their current stake and status
+		if valInfo.Stake < blockchain.MinValidatorStake {
+			utils.LogInfo("Registered validator %s has insufficient stake: %d < %d",
+				validatorAddress, valInfo.Stake, blockchain.MinValidatorStake)
+			return false, nil // Not an error, just ineligible
+		}
+		if !valInfo.IsActive { // Assuming IsActive reflects not being banned, etc.
+			utils.LogInfo("Registered validator %s is not active.", validatorAddress)
+			return false, nil
+		}
+		utils.LogInfo("Validator %s is registered, has sufficient stake (%d), and is active. Eligible.",
+			validatorAddress, valInfo.Stake)
+		return true, nil
+	}
+
+	// 2. If not registered, check general balance against MinValidatorStake
+	// This scenario is for nodes that *want* to become validators or are advertising as such
+	// but are not yet formally in the dpos.Validators list.
+	balance, err := currency.GetBalance(validatorAddress) // currency.GetBalance is from package currency
+	if err != nil {
+		utils.LogError("Error getting balance for potential validator %s: %v", validatorAddress, err)
+		return false, fmt.Errorf("could not get balance for %s: %w", validatorAddress, err)
+	}
+
+	if balance < blockchain.MinValidatorStake {
+		utils.LogInfo("Potential validator %s has insufficient balance to meet min stake: %d < %d",
+			validatorAddress, balance, blockchain.MinValidatorStake)
+		return false, nil // Not an error, just ineligible
+	}
+
+	// If they have enough balance, they are considered "eligible" to attempt registration.
+	// The actual registration process (consensus.RegisterValidator) will formally deduct the stake.
+	utils.LogInfo("Potential validator %s has sufficient balance (%d) to meet min stake. Eligible to register.",
+		validatorAddress, balance)
+	return true, nil
 }
 
 // DistributeBlockReward credits the block creator with a fixed block reward.
@@ -313,35 +352,6 @@ func (d *DPoS) Initialize(nodeID string) error {
 
 	// Creamos delegados para simulación
 	// En producción, estos se registrarían dinámicamente
-	delegatesList := []string{
-		"localhost:3002", "localhost:3003",
-		"localhost:3004", "localhost:3005", "localhost:3006", "localhost:3007",
-		"localhost:3008", "localhost:3009", "localhost:3010", "localhost:3011",
-		"localhost:3012", "localhost:3013", "localhost:3014", "localhost:3015",
-		"localhost:3016", "localhost:3017", "localhost:3018", "localhost:3019",
-		"localhost:3020", "localhost:3021", "localhost:3022", "localhost:3023",
-	}
-
-	// Initialize delegates with random stake
-	now := time.Now().UTC().Format(time.RFC3339)
-	for _, id := range delegatesList {
-		stake := 100.0 + float64(rand.Intn(900))
-		reliability := 95.0 + float64(rand.Intn(5)) // 95-100% reliability
-
-		d.Delegates[id] = &DelegateInfo{
-			NodeID:        id,
-			Stake:         stake,
-			Votes:         0,
-			BlocksCreated: 0,
-			IsActive:      false,
-			LastActive:    now,
-			Reliability:   reliability,
-			RewardAccrued: 0.0,
-			MissedBlocks:  0,
-			CreationTime:  now,
-		}
-		d.StakeByNodeID[id] = stake
-	}
 
 	// Set up initial active delegates
 	d.UpdateActiveDelegates()
@@ -388,6 +398,10 @@ func (d *DPoS) updateSchedule() {
 		}
 
 		// Update current producer
+		if len(d.ActiveDelegates) == 0 || len(d.ActiveDelegates) < d.RoundLength {
+			utils.LogInfo("Waiting for sufficient delegates to join. Currently have %d, need %d.", len(d.ActiveDelegates), d.RoundLength)
+			return
+		}
 		d.CurrentProducer = d.ActiveDelegates[d.CurrentSlot]
 
 		utils.LogInfo("DPoS schedule updated. Round: %d, Slot: %d, Producer: %s",
@@ -482,8 +496,19 @@ func (d *DPoS) ValidateBlock(block *blockchain.Block) bool {
 
 	// Validate block hash
 	if block.Hash != block.CalculateHash() {
-		utils.LogError("Block hash is invalid")
+		utils.LogError("Block hash is invalid for block %d by %s", block.Index, block.Validator)
 		return false
+	}
+
+	// Validate all transactions within the block
+	for i, tx := range block.Transactions {
+		if err := tx.Validate(); err != nil {
+			utils.LogError("Transaction %d in block %d (validator: %s) failed validation: %v", i, block.Index, block.Validator, err)
+			return false
+		}
+	}
+	if len(block.Transactions) > 0 {
+		utils.LogDebug("All %d transactions in block %d validated successfully.", len(block.Transactions), block.Index)
 	}
 
 	return true

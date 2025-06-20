@@ -10,6 +10,7 @@ import (
 
 	"slices"
 	"tripcodechain_go/blockchain"
+	"tripcodechain_go/p2p" // Added for PBFT logging
 	"tripcodechain_go/utils"
 )
 
@@ -191,6 +192,7 @@ func (p *PBFT) handleCommit(block *blockchain.Block, nodeID string) error {
 	if state.CommitCount >= threshold && !state.Committed {
 		state.Committed = true
 		utils.LogInfo("Block %s committed with %d votes", block.Hash, state.CommitCount)
+		p2p.LogPBFTConsensusReached(p.NodeID, block.Hash, time.Duration(0)) // New log call
 
 		// The block can now be added to the blockchain
 		return nil
@@ -236,6 +238,7 @@ func (p *PBFT) handleViewChange(message *Message) error {
 		p.View = viewInt
 		p.Primary = p.Validators[p.View%len(p.Validators)]
 		utils.LogInfo("View changed to %d. New primary: %s", p.View, p.Primary)
+		p2p.LogPBFTViewChange(p.NodeID, fmt.Sprintf("%d", p.View), time.Duration(0)) // New log call
 	}
 
 	return nil
@@ -269,6 +272,12 @@ func (p *PBFT) InitiateViewChange() error {
 
 	// Here, we would broadcast the message to all validators
 	utils.LogInfo("Initiated view change to view %d", newView)
+	jsonData, err := json.Marshal(message)
+	if err != nil {
+		utils.LogError("PBFT: Error marshalling ViewChange message: %v", err)
+		return err // Or handle error appropriately
+	}
+	p2p.BroadcastPBFTMessage(jsonData)
 
 	return nil
 }
@@ -294,8 +303,13 @@ func (p *PBFT) BroadcastPrepare(block *blockchain.Block) error {
 	hash := sha256.Sum256(dataBytes)
 	message.Signature = hex.EncodeToString(hash[:])
 
-	// In a real implementation, this would be broadcast to all validators
-	utils.LogInfo("Broadcasting prepare message for block %s", block.Hash)
+	utils.LogInfo("PBFT: Broadcasting PREPARE for block %s", block.Hash)
+	jsonData, err := json.Marshal(message)
+	if err != nil {
+		utils.LogError("PBFT: Error marshalling Prepare message: %v", err)
+		return err // Or handle error appropriately
+	}
+	p2p.BroadcastPBFTMessage(jsonData)
 
 	return nil
 }
@@ -321,8 +335,13 @@ func (p *PBFT) BroadcastCommit(block *blockchain.Block) error {
 	hash := sha256.Sum256(dataBytes)
 	message.Signature = hex.EncodeToString(hash[:])
 
-	// In a real implementation, this would be broadcast to all validators
-	utils.LogInfo("Broadcasting commit message for block %s", block.Hash)
+	utils.LogInfo("PBFT: Broadcasting COMMIT for block %s", block.Hash)
+	jsonData, err := json.Marshal(message)
+	if err != nil {
+		utils.LogError("PBFT: Error marshalling Commit message: %v", err)
+		return err // Or handle error appropriately
+	}
+	p2p.BroadcastPBFTMessage(jsonData)
 
 	return nil
 }

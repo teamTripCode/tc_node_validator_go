@@ -1,8 +1,11 @@
 /data
-/.env*
+/.env
 
 # NO ignorar estos archivos importantes
 !go.mod
 !go.sum
 !*.go
 !Dockerfile
+
+/k8s/secrets.yaml
+/scripts/cluster
