@@ -1,4 +1,3 @@
-// p2p/network.go
 package p2p
 
 import (

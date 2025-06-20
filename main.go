@@ -348,6 +348,7 @@ func updateValidatorsPeriodically(s *p2p.Server) {
 				validatorInfos := make([]consensus.ValidatorInfo, len(validators))
 				for i, v := range validators {
 					validatorInfos[i] = consensus.ValidatorInfo{Address: v}
+
 				}
 				dpos.UpdateValidators(validatorInfos)
 			} else {
