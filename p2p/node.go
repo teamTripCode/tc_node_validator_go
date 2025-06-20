@@ -444,26 +444,9 @@ func (n *Node) getNodeStatusFromHttp(httpPeerAddress string) (*NodeStatus, error
 	return &status, nil
 }
 
-func (n *Node) getNodePeers(nodeAddress string) ([]*NodeStatus, error) {
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(fmt.Sprintf("http://%s/nodes", nodeAddress))
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	var peers []*NodeStatus
-	if err := json.NewDecoder(resp.Body).Decode(&peers); err != nil {
-		return nil, err
-	}
-	return peers, nil
-}
-
 func (n *Node) RegisterWithNode(seedNodeAddress string, libp2pBootstrapPeers []string) { /* ... unchanged ... */
 }
 
-func (n *Node) attemptHttpRegistration(seedNodeAddress string, requestBodyBytes []byte, attempt int) bool { /* ... unchanged ... */
-	return true
-}
 func (n *Node) AddNode(address string)                      { /* ... unchanged ... */ }
 func (n *Node) GetKnownNodes() []string                     { /* ... unchanged ... */ return nil }
 func (n *Node) GetDiscoveredPeersWithStatus() []*NodeStatus { /* ... unchanged ... */ return nil }
@@ -507,7 +490,9 @@ func (n *Node) StopLibp2pServices() {
 func (n *Node) BootstrapDHT(bootstrapPeerAddrs []string) error { /* ... unchanged, uses p2pCtx ... */
 	return nil
 }
+
 func (n *Node) AdvertiseAsValidator() { /* ... unchanged, uses p2pCtx ... */ }
+
 func (n *Node) FindValidatorsDHT() (<-chan peer.AddrInfo, error) { /* ... unchanged, uses p2pCtx ... */
 	return nil, nil
 }
@@ -947,6 +932,7 @@ func (n *Node) periodicallyPublishValidators() {
 
 func (n *Node) StorePeerValidatorView(peerHttpAddress string, validators []NodeStatus) { /* ... unchanged ... */
 }
+
 func (n *Node) checkForNetworkPartition() {
 	localValidatorsMap := make(map[string]struct{})
 	n.mutex.RLock()
