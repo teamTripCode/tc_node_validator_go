@@ -108,7 +108,12 @@ func main() {
 		txMempool.GetSize(), criticalMempool.GetSize())
 
 	// Configure and start server
-	server := p2p.NewServer(node, txChain, criticalChain, txMempool, criticalMempool)
+	// Type assert consensusTx to *consensus.DPoS
+	dposConsensus, ok := consensusTx.(*consensus.DPoS)
+	if !ok {
+		log.Fatal("Consensus for transaction chain is not DPoS")
+	}
+	server := p2p.NewServer(node, txChain, criticalChain, txMempool, criticalMempool, dposConsensus)
 
 	// Start background processes
 	server.StartBackgroundProcessing()

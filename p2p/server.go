@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"tripcodechain_go/blockchain"
+	"tripcodechain_go/consensus"
 	"tripcodechain_go/mempool"
 	"tripcodechain_go/utils"
 
@@ -21,11 +22,12 @@ type Server struct {
 	CriticalChain   *blockchain.Blockchain
 	TxMempool       *mempool.Mempool
 	CriticalMempool *mempool.Mempool
+	DposService     *consensus.DPoS // Added DPoS service
 }
 
 // NewServer creates a new server instance
 func NewServer(node *Node, txChain *blockchain.Blockchain, criticalChain *blockchain.Blockchain,
-	txMempool *mempool.Mempool, criticalMempool *mempool.Mempool) *Server {
+	txMempool *mempool.Mempool, criticalMempool *mempool.Mempool, dposService *consensus.DPoS) *Server { // Added dposService parameter
 
 	server := &Server{
 		Router:          mux.NewRouter(),
@@ -34,6 +36,7 @@ func NewServer(node *Node, txChain *blockchain.Blockchain, criticalChain *blockc
 		CriticalChain:   criticalChain,
 		TxMempool:       txMempool,
 		CriticalMempool: criticalMempool,
+		DposService:     dposService, // Assigned dposService
 	}
 
 	server.setupRoutes()
@@ -69,6 +72,9 @@ func (s *Server) setupRoutes() {
 	// Block addition endpoints (for P2P synchronization)
 	s.Router.HandleFunc("/block/tx", s.AddTxBlockHandler).Methods("POST")
 	s.Router.HandleFunc("/block/critical", s.AddCriticalBlockHandler).Methods("POST")
+
+	// Validator update endpoint
+	s.Router.HandleFunc("/validators/update", s.UpdateValidatorsHandler).Methods("POST")
 }
 
 // Start starts the HTTP server
@@ -106,4 +112,12 @@ func (s *Server) ProcessMempools() {
 			s.ProcessCriticalMempool()
 		}
 	}
+}
+
+// UpdateValidatorsHandler placeholder for updating validators
+func (s *Server) UpdateValidatorsHandler(w http.ResponseWriter, r *http.Request) {
+	// Placeholder implementation
+	utils.LogInfo("Received request to update validators")
+	w.WriteHeader(http.StatusNotImplemented)
+	fmt.Fprintln(w, "Validator update functionality not yet implemented.")
 }

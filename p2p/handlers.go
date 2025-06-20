@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"tripcodechain_go/blockchain"
+	"tripcodechain_go/consensus"
 	"tripcodechain_go/utils"
 )
 
@@ -393,6 +394,37 @@ func (s *Server) processCriticalBatch(pendingCritical []interface{}) {
 
 	// Broadcast the new block to other nodes
 	s.optimizedBroadcastBlock(block, "critical")
+}
+
+// UpdateValidatorsHandler handles requests to update the validator list
+func (s *Server) UpdateValidatorsHandler(w http.ResponseWriter, r *http.Request) {
+	utils.LogInfo("Received request to update validators list from %s", r.RemoteAddr)
+
+	var validators []consensus.ValidatorInfo
+	if err := json.NewDecoder(r.Body).Decode(&validators); err != nil {
+		utils.LogError("Error decoding validator list: %v", err)
+		http.Error(w, "Invalid validator list format: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if len(validators) == 0 {
+		utils.LogInfo("Received empty validator list. Clearing existing validators.")
+		// Potentially clear validators if business logic dictates
+		// s.DposService.UpdateValidators(validators) // Call with empty list
+	}
+
+	// Assuming DposService is a field in Server struct pointing to DPoS instance
+	if s.DposService == nil {
+		utils.LogError("DPoS service is not initialized in the server.")
+		http.Error(w, "Internal server error: DPoS service not available", http.StatusInternalServerError)
+		return
+	}
+
+	s.DposService.UpdateValidators(validators)
+
+	utils.LogInfo("Successfully updated validator list with %d validators.", len(validators))
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, "Successfully updated validator list with %d validators.", len(validators))
 }
 
 // PingHandler responds to ping requests
