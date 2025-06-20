@@ -573,8 +573,29 @@ func (bc *Blockchain) AddBlock(block *Block) error {
 	bc.mutex.Lock()
 	defer bc.mutex.Unlock()
 
-	if !bc.isValidBlock(block) {
-		return errors.New("invalid block")
+	// Verify block signature before other validation steps
+	isValidSignature, err := block.VerifySignature()
+	if err != nil {
+		// For genesis block or other specific cases, signature verification might be skipped.
+		// Assuming genesis block (index 0) does not need signature verification if Validator is "genesis".
+		if block.Index == 0 && block.Validator == "genesis" {
+			utils.LogInfo("Skipping signature verification for genesis block.")
+		} else {
+			return fmt.Errorf("error verifying block signature for block %d: %w", block.Index, err)
+		}
+	} else if !isValidSignature {
+		// Ensure we don't reject genesis if it was skipped above but somehow isValidSignature is false
+		if !(block.Index == 0 && block.Validator == "genesis") {
+			return fmt.Errorf("invalid block signature for block %d, validator %s", block.Index, block.Validator)
+		}
+	}
+	if block.Index > 0 || (block.Index == 0 && block.Validator != "genesis") { // Log successful verification for non-genesis blocks
+	utils.LogInfo("Block %d signature verified successfully (Validator: %s)", block.Index, block.Validator)
+	}
+
+
+	if !bc.isValidBlock(block) { // isValidBlock checks PrevHash, Index, and current Hash integrity
+		return errors.New("invalid block structure or hash")
 	}
 
 	if err := bc.db.SaveBlock(block); err != nil {
