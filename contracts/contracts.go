@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math/big"
 	"strconv"
 	"time"
@@ -170,19 +171,19 @@ func deployRewardsSystem(cm *ContractManager, chain *blockchain.Blockchain) {
 	rewardsCode := []*ContractOperation{
 		{
 			OpCode: "METHOD",
-			Args:   []interface{}{"distribute", "Distribuir recompensas", true},
+			Args:   []any{"distribute", "Distribuir recompensas", true},
 		},
 		{
 			OpCode: OpNativeCall,
-			Args:   []interface{}{"get_block_producer"},
+			Args:   []any{"get_block_producer"},
 		},
 		{
 			OpCode: OpTransfer,
-			Args:   []interface{}{OpResult, "2000000000000000000"}, // 2 TCC
+			Args:   []any{OpResult, "2000000000000000000"}, // 2 TTK
 		},
 		{
 			OpCode: OpEmitEvent,
-			Args: []interface{}{"RewardsDistributed", map[string]interface{}{
+			Args: []any{"RewardsDistributed", map[string]any{
 				"block":     OpBlockNumber,
 				"validator": OpResult,
 				"amount":    "2000000000000000000",
@@ -279,14 +280,12 @@ func (cm *ContractManager) CreateContract(creator string, code []*ContractOperat
 		CreatedAt:    timestamp,
 		LastExecuted: timestamp,
 		CodeHash:     hex.EncodeToString(codeHash[:]),
-		Metadata:     make(map[string]interface{}),
+		Metadata:     make(map[string]any),
 	}
 
 	// Initialize state if provided
 	if initialState != nil {
-		for k, v := range initialState {
-			contract.State[k] = v
-		}
+		maps.Copy(contract.State, initialState)
 	}
 
 	// Transfer value if provided
@@ -335,7 +334,7 @@ func (cm *ContractManager) ExecuteContract(invocation *ContractInvocation) (*Con
 	execution := &ContractExecution{
 		Success:      false,
 		GasUsed:      0,
-		StateUpdates: make(map[string]interface{}),
+		StateUpdates: make(map[string]any),
 		Events:       make([]*ContractEvent, 0),
 		Logs:         make([]string, 0),
 	}
@@ -434,9 +433,7 @@ func (cm *ContractManager) executeOperations(contract *Contract, operations []*C
 
 	// Create a local state that will be committed if execution succeeds
 	localState := make(ContractState)
-	for k, v := range contract.State {
-		localState[k] = v
-	}
+	maps.Copy(localState, contract.State)
 
 	// Execute operations sequentially
 	for _, op := range operations {
@@ -986,7 +983,7 @@ func (cm *ContractManager) executeOperation(op *ContractOperation, contract *Con
 		}
 
 		// Prepare arguments for the call
-		callArgs := make([]interface{}, 0)
+		callArgs := make([]any, 0)
 		if len(op.Args) > 1 {
 			callArgs = op.Args[1:]
 		}
@@ -1258,15 +1255,11 @@ func (cm *ContractManager) DeployContractFromTemplate(
 	mergedState := make(ContractState)
 
 	// Copy template state
-	for k, v := range template.InitState {
-		mergedState[k] = v
-	}
+	maps.Copy(mergedState, template.InitState)
 
 	// Override with provided state
 	if initialState != nil {
-		for k, v := range initialState {
-			mergedState[k] = v
-		}
+		maps.Copy(mergedState, initialState)
 	}
 
 	// Convert methods to code operations
@@ -1301,9 +1294,7 @@ func (cm *ContractManager) GetContractState(address string) (ContractState, erro
 	// Create a copy of the state to prevent external modification
 	stateCopy := make(ContractState)
 	contract.mutex.RLock()
-	for k, v := range contract.State {
-		stateCopy[k] = v
-	}
+	maps.Copy(stateCopy, contract.State)
 	contract.mutex.RUnlock()
 
 	return stateCopy, nil
@@ -1323,7 +1314,7 @@ func (cm *ContractManager) GetContractEvents(address string, eventName string, l
 }
 
 // ExecuteReadOnlyCall executes a contract method without changing state
-func (cm *ContractManager) ExecuteReadOnlyCall(address string, method string, args []interface{}, caller string) (interface{}, error) {
+func (cm *ContractManager) ExecuteReadOnlyCall(address string, method string, args []any, caller string) (any, error) {
 	// Get contract
 	contract, err := cm.GetContract(address)
 	if err != nil {

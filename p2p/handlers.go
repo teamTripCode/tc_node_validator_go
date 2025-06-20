@@ -1,8 +1,6 @@
 package p2p
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -14,14 +12,17 @@ import (
 	"time"
 
 	"tripcodechain_go/blockchain"
+	"tripcodechain_go/consensus"
 	"tripcodechain_go/utils"
-	"tripcodechain_go/consensus" // Added for VerifyValidatorEligibility
-	// "tripcodechain_go/p2p/node" // Not explicitly needed if NodeInfo is only used by NodeManager
 )
 
 // RequestBodyForRegisterNode is used to parse the JSON request for registering a node.
 type RequestBodyForRegisterNode struct {
 	Address string `json:"address"`
+}
+
+type SeedNode struct {
+	nodeManager NodeManager
 }
 
 // RegisterNodeHandler returns an http.HandlerFunc for registering a new node.
@@ -83,10 +84,6 @@ func GetActiveNodesHandler(nodeManager *NodeManager) http.HandlerFunc {
 		}
 		utils.LogInfo("GetActiveNodesHandler: Responded with %d active nodes.", len(activeNodes))
 	}
-}
-
-type SeedNode struct {
-	nodeManager NodeManager
 }
 
 // GetNodesHandler returns the list of known node statuses (address and type).
@@ -772,7 +769,6 @@ func (s *Server) HeartbeatHandler(w http.ResponseWriter, r *http.Request) {
 		// Store the received validator view
 		s.Node.StorePeerValidatorView(payload.NodeID, payload.KnownValidators)
 	}
-
 
 	if s.Node == nil || s.DPoS == nil {
 		utils.LogError("HeartbeatHandler: Node or DPoS not initialized in server.")

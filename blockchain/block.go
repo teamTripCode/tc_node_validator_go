@@ -1,9 +1,9 @@
 package blockchain
 
 import (
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
-	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,12 +12,12 @@ import (
 	"time"
 
 	"tripcodechain_go/security" // Added for Signer interface
-	// "tripcodechain_go/utils" // Will be needed if logging is added here
+	"tripcodechain_go/utils"
 )
 
 // MerkleRoot calculates the Merkle root of transactions and critical processes.
 // This is a placeholder and should be implemented properly.
-func (b *Block) MerkleRoot() string {
+func (b *Block) CalculateMerkleRoot() string {
 	if b.Type == TransactionBlock && len(b.Transactions) > 0 {
 		// In a real implementation, you would hash each transaction and build a Merkle tree.
 		// For now, just hash the JSON of the first transaction as a placeholder.
@@ -63,7 +63,7 @@ func (b *Block) CalculateHash() string {
 	// Ensure MerkleRoot is calculated if not already set (e.g. before signing)
 	// This is a simplified placeholder; proper Merkle root calculation should be robust.
 	if b.MerkleRoot == "" {
-		b.MerkleRoot = b.MerkleRoot() // Calculate if empty
+		b.MerkleRoot = b.CalculateMerkleRoot() // Calculate if empty
 	}
 
 	txJSON, _ := json.Marshal(b.Transactions)
@@ -157,7 +157,6 @@ func (b *Block) VerifySignature() (bool, error) {
 	return isValid, nil
 }
 
-
 /**
  * MineBlock performs Proof-of-Work mining by incrementing the nonce until
  * the resulting hash starts with a number of zeros equal to the difficulty.
@@ -191,10 +190,10 @@ func (b *Block) ForgeBlock() {
 		// If it does, PoW will be based on an empty validator string, which is consistent
 		// but likely not what's intended for a block that will later be signed.
 		// Consider logging a warning here if this state is unexpected.
-		// utils.LogInfo("WARN: ForgeBlock called with empty b.Validator. PoW hash will reflect this.")
+		utils.LogInfo("WARN: ForgeBlock called with empty b.Validator. PoW hash will reflect this.")
 	}
 	b.Timestamp = time.Now().UTC().Format(time.RFC3339)
-	b.MerkleRoot = b.MerkleRoot() // Calculate Merkle root
+	b.MerkleRoot = b.CalculateMerkleRoot() // Calculate Merkle root
 
 	b.Nonce = 0 // Reset nonce
 	if b.Difficulty > 0 {
@@ -204,7 +203,6 @@ func (b *Block) ForgeBlock() {
 		b.Hash = b.CalculateHash() // Calculate hash once if no PoW mining
 	}
 }
-
 
 /**
  * NewBlock initializes a new block with default values.

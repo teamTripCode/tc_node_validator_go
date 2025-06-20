@@ -290,7 +290,7 @@ func (bc *Blockchain) RegisterSystemContract(name string, address string) {
 	// Add a block to the chain to record this event (optional)
 	newBlock := bc.CreateBlock()
 	newBlock.Data = fmt.Sprintf("RegisterSystemContract:%s:%s", name, address)
-	newBlock.ForgeBlock("system_registration")
+	newBlock.ForgeBlock()
 	bc.AddBlock(newBlock)
 }
 
@@ -539,7 +539,7 @@ func NewBlockchain(blockType BlockType, dataDir string) (*Blockchain, error) {
 		// Create genesis block
 		utils.LogInfo("Creating new blockchain with genesis block")
 		genesisBlock := NewBlock(0, "0", blockType)
-		genesisBlock.ForgeBlock("genesis")
+		genesisBlock.ForgeBlock()
 		blockchain.blocks = append(blockchain.blocks, genesisBlock)
 
 		// Save genesis block to database
@@ -590,9 +590,8 @@ func (bc *Blockchain) AddBlock(block *Block) error {
 		}
 	}
 	if block.Index > 0 || (block.Index == 0 && block.Validator != "genesis") { // Log successful verification for non-genesis blocks
-	utils.LogInfo("Block %d signature verified successfully (Validator: %s)", block.Index, block.Validator)
+		utils.LogInfo("Block %d signature verified successfully (Validator: %s)", block.Index, block.Validator)
 	}
-
 
 	if !bc.isValidBlock(block) { // isValidBlock checks PrevHash, Index, and current Hash integrity
 		return errors.New("invalid block structure or hash")
