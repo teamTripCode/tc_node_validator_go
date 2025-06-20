@@ -15,6 +15,7 @@ import (
 
 	"tripcodechain_go/blockchain"
 	"tripcodechain_go/utils"
+	"tripcodechain_go/consensus" // Added for VerifyValidatorEligibility
 	// "tripcodechain_go/p2p/node" // Not explicitly needed if NodeInfo is only used by NodeManager
 )
 
@@ -100,6 +101,7 @@ func (s *Server) GetNodesHandler(w http.ResponseWriter, r *http.Request) {
 
 // OriginalRegisterNodeHandler handles node registration requests for the Server struct.
 // It now expects a NodeRegistrationRequest containing Address and NodeType.
+// It also verifies validator eligibility if NodeType is "validator".
 func (s *Server) OriginalRegisterNodeHandler(w http.ResponseWriter, r *http.Request) {
 	var reqBody NodeRegistrationRequest // Use p2p.NodeRegistrationRequest from node.go
 	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
@@ -115,29 +117,47 @@ func (s *Server) OriginalRegisterNodeHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if reqBody.Address == s.Node.ID {
+	if reqBody.Address == s.Node.ID { // Assuming s.Node.ID is the HTTP address
 		http.Error(w, "Cannot register self", http.StatusBadRequest)
 		utils.LogInfo("OriginalRegisterNodeHandler: Attempt to register self from %s", reqBody.Address)
 		return
 	}
 
+	// Verify eligibility if the node claims to be a validator
+	if reqBody.NodeType == "validator" {
+		if s.DPoS == nil {
+			utils.LogError("OriginalRegisterNodeHandler: DPoS service is not available on the server to verify validator eligibility.")
+			http.Error(w, "Cannot verify validator eligibility: DPoS service unavailable", http.StatusInternalServerError)
+			return
+		}
+		// reqBody.Address is the HTTP address (e.g., localhost:3001)
+		// VerifyValidatorEligibility expects the underlying consensus address/ID.
+		// For now, we assume reqBody.Address can be used directly if it's the key in DPoS.Validators map.
+		// This might need adjustment if DPoS keys are LibP2P Peer IDs or public keys.
+		// Assuming validatorAddress for VerifyValidatorEligibility IS the HTTP address for now.
+		eligible, err := consensus.VerifyValidatorEligibility(s.DPoS, reqBody.Address)
+		if err != nil {
+			utils.LogError("OriginalRegisterNodeHandler: Error verifying validator eligibility for %s: %v", reqBody.Address, err)
+			http.Error(w, "Error verifying validator eligibility", http.StatusInternalServerError)
+			return
+		}
+		if !eligible {
+			utils.LogInfo("OriginalRegisterNodeHandler: Node %s (type: %s) failed eligibility check.", reqBody.Address, reqBody.NodeType)
+			http.Error(w, "Node not eligible to be a validator", http.StatusForbidden) // Or http.StatusBadRequest
+			return
+		}
+		utils.LogInfo("OriginalRegisterNodeHandler: Node %s successfully verified as eligible validator.", reqBody.Address)
+	}
+
 	// Check if node is responsive before adding
 	if isPingable(reqBody.Address) {
-		// Use AddNodeStatus to store the node with its type
-		// AddNodeStatus itself handles the logic of whether it's new or an update and logs appropriately.
 		s.Node.AddNodeStatus(NodeStatus{Address: reqBody.Address, NodeType: reqBody.NodeType})
-
-		// It's tricky to know if AddNodeStatus resulted in a "new" vs "updated" without more return info from it.
-		// For simplicity, we can assume OK or Created. If AddNodeStatus were to return a boolean if new, we could use it.
-		// Let's assume registration implies the node is now known or updated.
-		w.WriteHeader(http.StatusOK) // Or http.StatusCreated if we knew it was new. Ok is safe.
+		s.Node.UpdatePeerLastSeen(reqBody.Address) // Update last seen on successful registration processing
+		w.WriteHeader(http.StatusOK)
 		utils.LogInfo("Node %s (type: %s) processed for registration.", reqBody.Address, reqBody.NodeType)
-
-
-		// Immediately sync with the new node
-		go s.syncWithNode(reqBody.Address)
+		go s.syncWithNode(reqBody.Address) // Sync with the node
 	} else {
-		http.Error(w, "Node not reachable: "+reqBody.Address, http.StatusBadRequest)
+		http.Error(w, "Node not reachable for registration: "+reqBody.Address, http.StatusBadRequest)
 		utils.LogError("OriginalRegisterNodeHandler: Failed to register unreachable node: %s", reqBody.Address)
 	}
 }
@@ -675,6 +695,98 @@ func (s *Server) AddTxBlockHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		utils.LogError("Failed to add transaction block #%d from network", block.Index)
 		http.Error(w, "Invalid block", http.StatusBadRequest)
+	}
+}
+
+// HeartbeatHandler processes incoming heartbeat messages.
+func (s *Server) HeartbeatHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST method is allowed for heartbeat", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var payload HeartbeatPayload // Use p2p.HeartbeatPayload from node.go
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "Failed to decode heartbeat payload", http.StatusBadRequest)
+		utils.LogError("Error decoding heartbeat payload from %s: %v", r.RemoteAddr, err)
+		return
+	}
+	defer r.Body.Close()
+
+	utils.LogInfo("Received heartbeat from %s (LibP2P: %s) with %d known validators.",
+		payload.NodeID, payload.Libp2pPeerID, len(payload.KnownValidators))
+
+	// Update last seen time for the sender of the heartbeat
+	if s.Node != nil {
+		s.Node.UpdatePeerLastSeen(payload.NodeID) // payload.NodeID is the HTTP address
+	}
+
+
+	if s.Node == nil || s.DPoS == nil {
+		utils.LogError("HeartbeatHandler: Node or DPoS not initialized in server.")
+		http.Error(w, "Server not properly configured", http.StatusInternalServerError)
+		return
+	}
+
+	for _, reportedValidatorStatus := range payload.KnownValidators {
+		if reportedValidatorStatus.Address == s.Node.ID { // Don't process self
+			continue
+		}
+		if reportedValidatorStatus.NodeType != "validator" { // Sanity check
+			utils.LogDebug("Skipping non-validator entry %s from heartbeat from %s", reportedValidatorStatus.Address, payload.NodeID)
+			continue
+		}
+
+		// Check if we know this validator already using the new GetKnownNodeStatus method
+		_, exists := s.Node.GetKnownNodeStatus(reportedValidatorStatus.Address)
+
+		if exists {
+			// AddNodeStatus handles updates to existing nodes (e.g. NodeType change or other metadata if tracked)
+			s.Node.AddNodeStatus(reportedValidatorStatus)
+			continue
+		}
+
+		// If not known, verify eligibility
+		utils.LogInfo("Validator %s from heartbeat (sender: %s) is new. Verifying eligibility.",
+			reportedValidatorStatus.Address, payload.NodeID)
+
+		eligible, err := consensus.VerifyValidatorEligibility(s.DPoS, reportedValidatorStatus.Address)
+		if err != nil {
+			utils.LogError("Error verifying eligibility for %s (from heartbeat by %s): %v",
+				reportedValidatorStatus.Address, payload.NodeID, err)
+			continue
+		}
+
+		if eligible {
+			utils.LogInfo("Validator %s (from heartbeat by %s) is eligible. Adding to known nodes.",
+				reportedValidatorStatus.Address, payload.NodeID)
+			s.Node.AddNodeStatus(reportedValidatorStatus) // This will trigger gossip if it's a new validator for this node
+		} else {
+			utils.LogInfo("Validator %s (from heartbeat by %s) is not eligible.",
+				reportedValidatorStatus.Address, payload.NodeID)
+		}
+	}
+
+	w.WriteHeader(http.StatusOK)
+	// fmt.Fprintf(w, "Heartbeat acknowledged from %s", payload.NodeID) // Optional response
+}
+
+// NodeStatusHandler returns the node's status (address and NodeType).
+// This is intended to be used by other nodes to confirm NodeType after discovering via DHT.
+func (s *Server) NodeStatusHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		return
+	}
+
+	status := NodeStatus{ // p2p.NodeStatus
+		Address:  s.Node.ID,       // This is the HTTP address (e.g., localhost:3000)
+		NodeType: s.Node.NodeType, // NodeType (e.g., "validator", "regular")
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(status); err != nil {
+		http.Error(w, "Failed to encode node status", http.StatusInternalServerError)
+		utils.LogError("NodeStatusHandler: Error encoding node status: %v", err)
 	}
 }
 
