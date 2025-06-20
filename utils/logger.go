@@ -1,32 +1,67 @@
-// utils/logger.go
 package utils
 
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
+	"os"
+	"slices"
 	"time"
 )
 
 // Global verbose flag
 var Verbose = true
 
+// Global logger instance
+var globalLogger *log.Logger
+
+// Initialize the global logger
+func init() {
+	globalLogger = log.New(os.Stdout, "", log.LstdFlags)
+}
+
+// InitLogger initializes the logger with verbose and silent settings
+func InitLogger(verbose bool, silent bool) {
+	Verbose = verbose
+
+	if silent {
+		// Set logger to discard output (silent mode)
+		globalLogger = log.New(io.Discard, "", log.LstdFlags)
+	} else {
+		// Set logger to output to stdout
+		globalLogger = log.New(os.Stdout, "", log.LstdFlags)
+	}
+}
+
+// GetLogger returns the current global logger
+func GetLogger() *log.Logger {
+	return globalLogger
+}
+
+// SetLogger sets the global logger to the provided logger
+func SetLogger(logger *log.Logger) {
+	if logger != nil {
+		globalLogger = logger
+	}
+}
+
 // LogInfo logs an info message
 func LogInfo(format string, args ...interface{}) {
-	log.Printf("[INFO] "+format, args...)
+	globalLogger.Printf("[INFO] "+format, args...)
 }
 
 // LogDebug logs a debug message if verbose mode is enabled
 func LogDebug(format string, args ...interface{}) {
 	if Verbose {
-		log.Printf("[DEBUG] "+format, args...)
+		globalLogger.Printf("[DEBUG] "+format, args...)
 	}
 }
 
 // LogError logs an error message
 func LogError(format string, args ...interface{}) {
-	log.Printf("[ERROR] "+format, args...)
+	globalLogger.Printf("[ERROR] "+format, args...)
 }
 
 // LogSecurityEvent logs a security-related event with structured data
@@ -43,7 +78,7 @@ func LogSecurityEvent(eventType string, data map[string]interface{}) {
 	}
 
 	// Log the security event
-	log.Printf("[SECURITY] Event: %s - Data: %s", eventType, string(jsonData))
+	globalLogger.Printf("[SECURITY] Event: %s - Data: %s", eventType, string(jsonData))
 }
 
 // SetVerbose sets the verbose logging mode
@@ -58,12 +93,7 @@ func GetVerbose() bool {
 
 // Contains checks if a string is in a slice
 func Contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(slice, item)
 }
 
 // NewSeededRand creates a new seeded random number generator

@@ -113,11 +113,3 @@ func (s *Server) ProcessMempools() {
 		}
 	}
 }
-
-// UpdateValidatorsHandler placeholder for updating validators
-func (s *Server) UpdateValidatorsHandler(w http.ResponseWriter, r *http.Request) {
-	// Placeholder implementation
-	utils.LogInfo("Received request to update validators")
-	w.WriteHeader(http.StatusNotImplemented)
-	fmt.Fprintln(w, "Validator update functionality not yet implemented.")
-}
