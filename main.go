@@ -241,7 +241,7 @@ func main() {
 			utils.LogError("Invalid IP_SCAN_TARGET_PORT: %v. Using default: %d", errConv, targetPortForScan)
 		}
 	}
-	keysDataDir := config.DataDir + "/keys"
+	keysDataDir = config.DataDir + "/keys"
 	if err := os.MkdirAll(keysDataDir, 0700); err != nil {
 		log.Fatalf("Error creating keys directory: %v", err)
 	}

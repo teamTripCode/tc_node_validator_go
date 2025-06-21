@@ -50,18 +50,15 @@ USER appuser
 # Establecer directorio de trabajo
 WORKDIR /app
 
-# Variables de entorno por defecto y nuevas
+# Variables de entorno por defecto (sin datos sensibles)
 ENV DATA_DIR=/app/data \
     LOG_DIR=/app/logs \
     CONFIG_DIR=/app/config \
     P2P_PORT=3001 \
     API_PORT=3002 \
-    # MCP_PORT=3003 (Comentado si no se usa activamente) \
     METRICS_PORT=9090 \
-    # MCP_METRICS_PORT=9091 (Comentado si no se usa activamente) \
     PBFT_WS_PORT=8546 \
     PBOS_WS_PORT=8547 \
-    NODE_KEY_PASSPHRASE="" \
     SEED_NODES="" \
     NODE_TYPE="validator" \
     BOOTSTRAP_PEERS="" \

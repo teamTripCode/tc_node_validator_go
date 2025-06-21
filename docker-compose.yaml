@@ -1,0 +1,242 @@
+services:
+  # Nodo 1 - Puerto base 3001
+  dpos-node-1:
+    build: .
+    container_name: dpos-node-1
+    restart: unless-stopped
+    ports:
+      - "3001:3001"    # P2P Port
+      - "3002:3002"    # API Port
+      - "4001:4001"    # LibP2P Port (P2P_PORT + 1000)
+      - "9001:9090"    # Metrics Port
+      - "8001:8546"    # PBFT WebSocket
+      - "8101:8547"    # PBOS WebSocket
+    environment:
+      - NODE_KEY_PASSPHRASE=${NODE_KEY_PASSPHRASE_1:-node1_pass}
+      - P2P_PORT=3001
+      - API_PORT=3002
+      - METRICS_PORT=9090
+      - PBFT_WS_PORT=8546
+      - PBOS_WS_PORT=8547
+      - NODE_TYPE=validator
+      - SEED_NODES=localhost:3000
+      - BOOTSTRAP_PEERS=/ip4/127.0.0.1/tcp/4002/p2p/node2,/ip4/127.0.0.1/tcp/4003/p2p/node3
+    volumes:
+      - ./data/node1:/app/data
+      - ./logs/node1:/app/logs
+      - ./config/node1:/app/config
+    networks:
+      dpos-network:
+        ipv4_address: 172.20.0.10
+
+  # Nodo 2 - Puerto base 3002
+  dpos-node-2:
+    build: .
+    container_name: dpos-node-2
+    restart: unless-stopped
+    ports:
+      - "3002:3001"    # P2P Port
+      - "3003:3002"    # API Port
+      - "4002:4001"    # LibP2P Port
+      - "9002:9090"    # Metrics Port
+      - "8002:8546"    # PBFT WebSocket
+      - "8102:8547"    # PBOS WebSocket
+    environment:
+      - NODE_KEY_PASSPHRASE=${NODE_KEY_PASSPHRASE_2:-node2_pass}
+      - P2P_PORT=3001
+      - API_PORT=3002
+      - METRICS_PORT=9090
+      - PBFT_WS_PORT=8546
+      - PBOS_WS_PORT=8547
+      - NODE_TYPE=validator
+      - SEED_NODES=localhost:3001,localhost:3003,localhost:3004
+      - BOOTSTRAP_PEERS=/ip4/127.0.0.1/tcp/4001/p2p/node1,/ip4/127.0.0.1/tcp/4003/p2p/node3
+    volumes:
+      - ./data/node2:/app/data
+      - ./logs/node2:/app/logs
+      - ./config/node2:/app/config
+    networks:
+      dpos-network:
+        ipv4_address: 172.20.0.11
+
+  # Nodo 3 - Puerto base 3003
+  dpos-node-3:
+    build: .
+    container_name: dpos-node-3
+    restart: unless-stopped
+    ports:
+      - "3003:3001"    # P2P Port
+      - "3004:3002"    # API Port
+      - "4003:4001"    # LibP2P Port
+      - "9003:9090"    # Metrics Port
+      - "8003:8546"    # PBFT WebSocket
+      - "8103:8547"    # PBOS WebSocket
+    environment:
+      - NODE_KEY_PASSPHRASE=${NODE_KEY_PASSPHRASE_3:-node3_pass}
+      - P2P_PORT=3001
+      - API_PORT=3002
+      - METRICS_PORT=9090
+      - PBFT_WS_PORT=8546
+      - PBOS_WS_PORT=8547
+      - NODE_TYPE=validator
+      - SEED_NODES=localhost:3001,localhost:3002,localhost:3004
+      - BOOTSTRAP_PEERS=/ip4/127.0.0.1/tcp/4001/p2p/node1,/ip4/127.0.0.1/tcp/4002/p2p/node2
+    volumes:
+      - ./data/node3:/app/data
+      - ./logs/node3:/app/logs
+      - ./config/node3:/app/config
+    networks:
+      dpos-network:
+        ipv4_address: 172.20.0.12
+
+  # Nodo 4 - Puerto base 3004
+  dpos-node-4:
+    build: .
+    container_name: dpos-node-4
+    restart: unless-stopped
+    ports:
+      - "3004:3001"    # P2P Port
+      - "3005:3002"    # API Port
+      - "4004:4001"    # LibP2P Port
+      - "9004:9090"    # Metrics Port
+      - "8004:8546"    # PBFT WebSocket
+      - "8104:8547"    # PBOS WebSocket
+    environment:
+      - NODE_KEY_PASSPHRASE=${NODE_KEY_PASSPHRASE_4:-node4_pass}
+      - P2P_PORT=3001
+      - API_PORT=3002
+      - METRICS_PORT=9090
+      - PBFT_WS_PORT=8546
+      - PBOS_WS_PORT=8547
+      - NODE_TYPE=validator
+      - SEED_NODES=localhost:3001,localhost:3002,localhost:3003
+      - BOOTSTRAP_PEERS=/ip4/127.0.0.1/tcp/4001/p2p/node1,/ip4/127.0.0.1/tcp/4002/p2p/node2
+    volumes:
+      - ./data/node4:/app/data
+      - ./logs/node4:/app/logs
+      - ./config/node4:/app/config
+    networks:
+      dpos-network:
+        ipv4_address: 172.20.0.13
+
+  # Nodo 5 - Puerto base 3005
+  dpos-node-5:
+    build: .
+    container_name: dpos-node-5
+    restart: unless-stopped
+    ports:
+      - "3005:3001"    # P2P Port
+      - "3006:3002"    # API Port
+      - "4005:4001"    # LibP2P Port
+      - "9005:9090"    # Metrics Port
+      - "8005:8546"    # PBFT WebSocket
+      - "8105:8547"    # PBOS WebSocket
+    environment:
+      - NODE_KEY_PASSPHRASE=${NODE_KEY_PASSPHRASE_5:-node5_pass}
+      - P2P_PORT=3001
+      - API_PORT=3002
+      - METRICS_PORT=9090
+      - PBFT_WS_PORT=8546
+      - PBOS_WS_PORT=8547
+      - NODE_TYPE=validator
+      - SEED_NODES=localhost:3001,localhost:3002,localhost:3003
+      - BOOTSTRAP_PEERS=/ip4/127.0.0.1/tcp/4001/p2p/node1,/ip4/127.0.0.1/tcp/4002/p2p/node2
+    volumes:
+      - ./data/node5:/app/data
+      - ./logs/node5:/app/logs
+      - ./config/node5:/app/config
+    networks:
+      dpos-network:
+        ipv4_address: 172.20.0.14
+
+  # Nodo 6 - Puerto base 3006
+  dpos-node-6:
+    build: .
+    container_name: dpos-node-6
+    restart: unless-stopped
+    ports:
+      - "3006:3001"    # P2P Port
+      - "3007:3002"    # API Port
+      - "4006:4001"    # LibP2P Port
+      - "9006:9090"    # Metrics Port
+      - "8006:8546"    # PBFT WebSocket
+      - "8106:8547"    # PBOS WebSocket
+    environment:
+      - NODE_KEY_PASSPHRASE=${NODE_KEY_PASSPHRASE_6:-node6_pass}
+      - P2P_PORT=3001
+      - API_PORT=3002
+      - METRICS_PORT=9090
+      - PBFT_WS_PORT=8546
+      - PBOS_WS_PORT=8547
+      - NODE_TYPE=validator
+      - SEED_NODES=localhost:3001,localhost:3002,localhost:3003
+      - BOOTSTRAP_PEERS=/ip4/127.0.0.1/tcp/4001/p2p/node1,/ip4/127.0.0.1/tcp/4002/p2p/node2
+    volumes:
+      - ./data/node6:/app/data
+      - ./logs/node6:/app/logs
+      - ./config/node6:/app/config
+    networks:
+      dpos-network:
+        ipv4_address: 172.20.0.15
+
+  # Nodo 7 - Puerto base 3007
+  dpos-node-7:
+    build: .
+    container_name: dpos-node-7
+    restart: unless-stopped
+    ports:
+      - "3007:3001"    # P2P Port
+      - "3008:3002"    # API Port
+      - "4007:4001"    # LibP2P Port
+      - "9007:9090"    # Metrics Port
+      - "8007:8546"    # PBFT WebSocket
+      - "8107:8547"    # PBOS WebSocket
+    environment:
+      - NODE_KEY_PASSPHRASE=${NODE_KEY_PASSPHRASE_7:-node7_pass}
+      - P2P_PORT=3001
+      - API_PORT=3002
+      - METRICS_PORT=9090
+      - PBFT_WS_PORT=8546
+      - PBOS_WS_PORT=8547
+      - NODE_TYPE=validator
+      - SEED_NODES=localhost:3001,localhost:3002,localhost:3003
+      - BOOTSTRAP_PEERS=/ip4/127.0.0.1/tcp/4001/p2p/node1,/ip4/127.0.0.1/tcp/4002/p2p/node2
+    volumes:
+      - ./data/node7:/app/data
+      - ./logs/node7:/app/logs
+      - ./config/node7:/app/config
+    networks:
+      dpos-network:
+        ipv4_address: 172.20.0.16
+
+networks:
+  dpos-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+          gateway: 172.20.0.1
+
+volumes:
+  # Volúmenes para cada nodo
+  node1-data:
+  node1-logs:
+  node1-config:
+  node2-data:
+  node2-logs:
+  node2-config:
+  node3-data:
+  node3-logs:
+  node3-config:
+  node4-data:
+  node4-logs:
+  node4-config:
+  node5-data:
+  node5-logs:
+  node5-config:
+  node6-data:
+  node6-logs:
+  node6-config:
+  node7-data:
+  node7-logs:
+  node7-config:
