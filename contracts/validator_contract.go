@@ -3,7 +3,7 @@ package contracts
 import (
 	"errors"
 	"tripcodechain_go/pkg/validation" // Changed import
-	"tripcodechain_go/utils" // Added for LogInfo in placeholder methods
+	"tripcodechain_go/utils"          // Added for LogInfo in placeholder methods
 )
 
 // ValidatorContract defines the structure for the validator contract.

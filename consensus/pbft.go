@@ -11,7 +11,7 @@ import (
 	"slices"
 	"tripcodechain_go/blockchain"
 	consensus_events "tripcodechain_go/pkg/consensus_events" // Added for PBFT logging
-	"tripcodechain_go/pkg/consensus_types" // Added for Message and ConsensusType
+	"tripcodechain_go/pkg/consensus_types"                   // Added for Message and ConsensusType
 	"tripcodechain_go/utils"
 )
 

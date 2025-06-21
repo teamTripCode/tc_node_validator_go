@@ -11,8 +11,8 @@ import (
 	"sort"
 	"tripcodechain_go/blockchain"
 	"tripcodechain_go/currency"
-	"tripcodechain_go/utils"
 	"tripcodechain_go/pkg/consensus_types" // Changed for consensus_types.Message and consensus_types.ConsensusType
+	"tripcodechain_go/utils"
 )
 
 // --- Copied from existing pkg/validation/dpos_types.go ---

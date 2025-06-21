@@ -32,18 +32,13 @@ RUN apk add --no-cache ca-certificates tzdata curl
 RUN adduser -D -s /bin/sh -u 1000 appuser
 
 # Crear directorios necesarios con permisos correctos
-RUN mkdir -p /app/data/blockchain \
-             /app/data/tx_chain \
-             /app/logs \
-             /app/tmp \
+# /app/data y /app/logs serán manejados por VOLUMEs
+RUN mkdir -p /app/tmp \
              /app/config \
              /etc/tripcodechain/mcp && \
     chown -R appuser:appuser /app /etc/tripcodechain && \
     chmod -R 755 /app /etc/tripcodechain && \
-    chmod -R 777 /app/tmp && \
-    # Crear enlaces simbólicos para compatibilidad
-    ln -s /app/data /data && \
-    ln -s /app/logs /var/log/validator-node
+    chmod -R 777 /app/tmp
 
 # Copiar binario
 COPY --from=builder /dpos-node /usr/local/bin/dpos-node
@@ -55,20 +50,43 @@ USER appuser
 # Establecer directorio de trabajo
 WORKDIR /app
 
-# Variables de entorno por defecto
+# Variables de entorno por defecto y nuevas
 ENV DATA_DIR=/app/data \
     LOG_DIR=/app/logs \
     CONFIG_DIR=/app/config \
     P2P_PORT=3001 \
     API_PORT=3002 \
-    MCP_PORT=3003 \
+    # MCP_PORT=3003 (Comentado si no se usa activamente) \
     METRICS_PORT=9090 \
-    MCP_METRICS_PORT=9091
+    # MCP_METRICS_PORT=9091 (Comentado si no se usa activamente) \
+    PBFT_WS_PORT=8546 \
+    PBOS_WS_PORT=8547 \
+    NODE_KEY_PASSPHRASE="" \
+    SEED_NODES="" \
+    NODE_TYPE="validator" \
+    BOOTSTRAP_PEERS="" \
+    IP_SCANNER_ENABLED="false" \
+    IP_SCAN_RANGES="127.0.0.1/24" \
+    IP_SCAN_TARGET_PORT="3001"
 
-EXPOSE 3001 3002 3003 9090 9091
+# Puertos a exponer:
+# P2P_PORT (HTTP para algunas interacciones, el real de libp2p es P2P_PORT + 1000)
+# API_PORT (HTTP API principal)
+# METRICS_PORT (Prometheus metrics)
+# PBFT_WS_PORT (Websocket para PBFT)
+# PBOS_WS_PORT (Websocket para PBOS)
+# LIBP2P_PORT (P2P_PORT + 1000, para descubrimiento y comunicación directa)
+# Nota: P2P_PORT se expone para compatibilidad con chequeos de salud/API en ese puerto si aplica,
+# pero el puerto crucial para libp2p es P2P_PORT + 1000.
+# Docker EXPOSE no mapea puertos, solo los documenta. El mapeo se hace en `docker run -p` o Kubernetes.
+EXPOSE ${P2P_PORT} ${API_PORT} ${METRICS_PORT} ${PBFT_WS_PORT} ${PBOS_WS_PORT}
+# EXPOSE 4001 # Ejemplo si P2P_PORT=3001, entonces libp2p escucha en 4001. Se podría añadir dinámicamente en el entrypoint si fuera necesario.
 
-# Health check mejorado
+# Volúmenes para datos persistentes
+VOLUME ["/app/data", "/app/logs", "/app/config"]
+
+# Health check mejorado (asume que API_PORT es el puerto para health checks)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
-    CMD curl -f http://localhost:3002/health || exit 1
+    CMD curl -f http://localhost:${API_PORT}/health || exit 1
 
 CMD ["/usr/local/bin/dpos-node"]

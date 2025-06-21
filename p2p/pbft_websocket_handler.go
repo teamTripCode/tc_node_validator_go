@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"tripcodechain_go/consensus"      // Still needed for consensus.Consensus and consensus.PBFT
+	"tripcodechain_go/consensus"           // Still needed for consensus.Consensus and consensus.PBFT
 	"tripcodechain_go/pkg/consensus_types" // Added for consensus_types.Message
 	"tripcodechain_go/utils"
 )
