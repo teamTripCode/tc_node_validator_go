@@ -150,7 +150,7 @@ func InitNativeToken(chain *Blockchain, symbol string, initialSupply int) *curre
 	// Convert the initial supply to base units
 	supplyInQuark := new(big.Int).Mul(
 		big.NewInt(int64(initialSupply)),
-		big.NewInt(currency.TripCoin), // TripCoin = 1e18
+		big.NewInt(currency.TripKoin), // TripCoin = 1e18
 	)
 
 	// Get current total supply

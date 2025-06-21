@@ -1,4 +1,3 @@
-// p2p/node.go
 package p2p
 
 import (
@@ -18,17 +17,16 @@ import (
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/libp2p/go-libp2p/core/discovery"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/p2p/discovery/routing"
 
-	// discoveryUtil "github.com/libp2p/go-libp2p/p2p/discovery/util" // Unused
 	"tripcodechain_go/pkg/validation" // Changed for DPoS types
 	"tripcodechain_go/security"
 	"tripcodechain_go/utils"
 
 	"github.com/multiformats/go-multiaddr"
-	// "tripcodechain_go/consensus" // Removed if DPoS was the only reason, or keep if other consensus types used
 )
 
 const ValidatorServiceTag = "tripcodechain-validator"
@@ -444,20 +442,6 @@ func (n *Node) getNodeStatusFromHttp(httpPeerAddress string) (*NodeStatus, error
 	return &status, nil
 }
 
-func (n *Node) getNodePeers(nodeAddress string) ([]*NodeStatus, error) {
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(fmt.Sprintf("http://%s/nodes", nodeAddress))
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	var peers []*NodeStatus
-	if err := json.NewDecoder(resp.Body).Decode(&peers); err != nil {
-		return nil, err
-	}
-	return peers, nil
-}
-
 func (n *Node) RegisterWithNode(seedNodeAddress string, libp2pBootstrapPeers []string) {
 	utils.LogInfo("Initiating registration process with seed node: %s", seedNodeAddress)
 
@@ -581,24 +565,13 @@ func (n *Node) GetDiscoveredPeersWithStatus() []*NodeStatus {
 	n.discoveredPeersMutex.Lock()
 	defer n.discoveredPeersMutex.Unlock()
 
-	if n.discoveredPeersWithStatus == nil || len(n.discoveredPeersWithStatus) == 0 {
+	if len(n.discoveredPeersWithStatus) == 0 {
 		return []*NodeStatus{} // Return empty slice, not nil
 	}
 
 	// Return a copy of the slice to prevent external modification
 	copiedSlice := make([]*NodeStatus, len(n.discoveredPeersWithStatus))
-	for i, status := range n.discoveredPeersWithStatus {
-		// If NodeStatus is a pointer to a struct, and you want to prevent modification
-		// of the structs themselves, you'd need a deep copy here.
-		// Assuming NodeStatus itself is a struct or its fields are value types,
-		// a shallow copy of the pointers is usually what's intended when copying a slice of pointers.
-		// The prompt implies copying the slice, not deep copying each element.
-		copiedSlice[i] = status
-	}
-	// A more idiomatic way to copy the slice if NodeStatus pointers are fine:
-	// copiedSlice := make([]*NodeStatus, len(n.discoveredPeersWithStatus))
-	// copy(copiedSlice, n.discoveredPeersWithStatus)
-
+	copy(copiedSlice, n.discoveredPeersWithStatus)
 	return copiedSlice
 }
 
@@ -727,12 +700,38 @@ func (n *Node) AdvertiseAsValidator() {
 		return
 	}
 
-	// The Advertise function typically starts a background process.
-	routing.Advertise(n.p2pCtx, n.routingDiscovery, ValidatorServiceTag)
+	// Iniciar advertising en una goroutine separada
+	go func() {
+		ticker := time.NewTicker(30 * time.Minute) // Re-advertise cada 30 minutos
+		defer ticker.Stop()
 
-	// It's important to also ensure the DHT is in server mode and the host is listening.
-	// These are typically set up during NewNode.
-	utils.LogInfo("Initiated advertising self as a validator using service tag: %s. This runs periodically.", ValidatorServiceTag)
+		// Advertise inicial
+		if err := n.advertiseOnce(); err != nil {
+			utils.LogError("Initial advertising failed: %v", err)
+		}
+
+		// Re-advertise periódicamente
+		for {
+			select {
+			case <-ticker.C:
+				if err := n.advertiseOnce(); err != nil {
+					utils.LogError("Periodic advertising failed: %v", err)
+				}
+			case <-n.p2pCtx.Done():
+				utils.LogInfo("Stopping validator advertising due to context cancellation")
+				return
+			}
+		}
+	}()
+}
+
+func (n *Node) advertiseOnce() error {
+	_, err := n.routingDiscovery.Advertise(n.p2pCtx, ValidatorServiceTag, discovery.TTL(time.Hour))
+	if err != nil {
+		return fmt.Errorf("failed to advertise: %w", err)
+	}
+	utils.LogInfo("Successfully advertised as validator")
+	return nil
 }
 
 func (n *Node) FindValidatorsDHT() (<-chan peer.AddrInfo, error) {
