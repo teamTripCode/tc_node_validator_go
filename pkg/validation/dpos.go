@@ -78,7 +78,7 @@ func NewDPoS(currencyManager *currency.CurrencyManager) *DPoS { // Returns *vali
 		Delegates:        make(map[string]*DelegateInfo),
 		Validators:       make(map[string]Validator),
 		ActiveDelegates:  make([]string, 0),
-		RoundLength:      21,
+		RoundLength:      blockchain.GetNumberOfDelegates(),
 		BlockTime:        3,
 		StakeByNodeID:    make(map[string]float64),
 		VotesByNodeID:    make(map[string]string),
@@ -714,7 +714,7 @@ func SelectDelegates(dpos *DPoS) error {
 		val.IsActive = false
 		dpos.Validators[address] = val
 	}
-	numDelegates := blockchain.NumberOfDelegates
+	numDelegates := blockchain.GetNumberOfDelegates()
 	if len(validators) < numDelegates {
 		numDelegates = len(validators)
 	}
