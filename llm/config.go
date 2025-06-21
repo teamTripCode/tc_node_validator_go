@@ -31,7 +31,6 @@ func LoadLLMConfig(filePath string) (LLMConfig, error) {
 	}
 	utils.LogInfo("Attempting to load LLM config from: %s", absPath)
 
-
 	data, err := os.ReadFile(absPath)
 	if err != nil {
 		utils.LogError("Error reading LLM config file %s: %v", absPath, err)

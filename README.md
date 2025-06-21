@@ -108,8 +108,86 @@ The MCP and Distributed LLM Service components extend the capabilities of the Tr
 
 ### Requisitos Mínimos
 - Go 1.24.2+ ([Instalación](https://go.dev/dl/))
+- Docker (para ejecución en contenedor)
 - 4GB RAM (Recomendado 8GB+ para redes grandes)
 - 50GB Almacenamiento (SSD recomendado)
-- Puerto TCP/UDP abierto (default: 3000)
+
+### Variables de Entorno y Puertos
+
+El nodo se puede configurar mediante variables de entorno. Al ejecutar con Docker, estas variables se pueden pasar al contenedor.
+
+**Puertos Principales:**
+*   **P2P_PORT (HTTP/API):** Puerto para la API HTTP principal y las interacciones P2P HTTP (ej. heartbeats, estado del nodo).
+    *   Default: `3001`
+    *   Variable de Entorno: `P2P_PORT`
+*   **LIBP2P_PORT (TCP/UDP):** Puerto utilizado por Libp2p para la comunicación directa entre pares (descubrimiento DHT, gossip, etc.).
+    *   Calculado como: `P2P_PORT + 1000` (ej. si `P2P_PORT` es 3001, Libp2p usará 4001).
+*   **PBFT_WS_PORT (WebSocket):** Puerto para el servidor WebSocket de consenso PBFT.
+    *   Default: `8546`
+    *   Variable de Entorno: `PBFT_WS_PORT`
+*   **PBOS_WS_PORT (WebSocket):** Puerto para el servidor WebSocket de pBOS.
+    *   Default: `8547`
+    *   Variable de Entorno: `PBOS_WS_PORT`
+*   **METRICS_PORT (HTTP):** Puerto para exponer métricas en formato Prometheus.
+    *   Default: `9090`
+    *   Variable de Entorno: `METRICS_PORT`
+
+**Variables de Configuración del Nodo:**
+*   `DATA_DIR`: Directorio para los datos de la blockchain (bloques, estado, etc.) y claves del nodo.
+    *   Default en Docker: `/app/data`
+*   `CONFIG_DIR`: Directorio para archivos de configuración del nodo.
+    *   Default en Docker: `/app/config`
+*   `LOG_DIR`: Directorio para los archivos de log del nodo.
+    *   Default en Docker: `/app/logs`
+*   `NODE_KEY_PASSPHRASE`: **Requerida.** Contraseña utilizada para encriptar/desencriptar la clave privada del nodo.
+*   `SEED_NODES`: Lista opcional de direcciones de nodos semilla (formato: `ip:puerto,ip:puerto`) para el arranque inicial de la red.
+    *   Ejemplo: `"10.0.0.1:3001,10.0.0.2:3001"`
+*   `NODE_TYPE`: Define el tipo de nodo.
+    *   Default: `"validator"`
+    *   Opciones: `"validator"`, `"regular"` (u otros tipos que se definan).
+*   `BOOTSTRAP_PEERS`: Lista opcional de multiaddrs de peers Libp2p para el bootstrap inicial de la DHT.
+    *   Ejemplo: `"/ip4/10.0.0.1/tcp/4001/p2p/QmPeerID1,/ip4/10.0.0.2/tcp/4001/p2p/QmPeerID2"`
+*   `IP_SCANNER_ENABLED`: Habilita (`"true"`) o deshabilita (`"false"`) el escáner de IP para descubrir peers.
+    *   Default: `"false"`
+*   `IP_SCAN_RANGES`: Lista de rangos CIDR que el escáner de IP debe revisar.
+    *   Default: `"127.0.0.1/24"`
+    *   Ejemplo: `"192.168.1.0/24,10.0.0.0/8"`
+*   `IP_SCAN_TARGET_PORT`: Puerto HTTP (el `P2P_PORT` de otros nodos) al que el escáner de IP intentará conectarse.
+    *   Default: Valor de `P2P_PORT` (ej. `3001`)
+
+**Ejecución con Docker:**
+
+Para construir la imagen Docker:
+```bash
+docker build -t tripcodechain-node .
+```
+
+Para ejecutar el contenedor (ejemplo básico):
+```bash
+docker run -d \
+  --name tcc-node \
+  -p 3001:3001 \ # Mapea P2P_PORT (HTTP/API)
+  -p 4001:4001 \ # Mapea LIBP2P_PORT (TCP)
+  -p 4001:4001/udp \ # Mapea LIBP2P_PORT (UDP)
+  -p 8546:8546 \ # Mapea PBFT_WS_PORT
+  -p 8547:8547 \ # Mapea PBOS_WS_PORT
+  -p 9090:9090 \ # Mapea METRICS_PORT
+  -v $(pwd)/node_data:/app/data \
+  -v $(pwd)/node_config:/app/config \
+  -v $(pwd)/node_logs:/app/logs \
+  -e NODE_KEY_PASSPHRASE="your_strong_passphrase_here" \
+  -e SEED_NODES="<ip_seed_1>:<port_seed_1>" \
+  tripcodechain-node
+```
+Asegúrate de reemplazar `"your_strong_passphrase_here"` y configurar los volúmenes y otras variables según sea necesario.
+
+### Volúmenes Persistentes (con Docker)
+
+Cuando se ejecuta en Docker, se recomienda mapear los siguientes directorios internos del contenedor a volúmenes en el host para persistir los datos:
+*   `/app/data`: Contiene los datos de la blockchain (tx_chain, critical_chain) y las claves criptográficas del nodo (`keys`). Es crucial persistir este directorio.
+*   `/app/logs`: Contiene los archivos de log generados por el nodo.
+*   `/app/config`: Puede usarse para montar archivos de configuración personalizados si la aplicación los soporta.
+
+---
 
 

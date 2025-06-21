@@ -27,8 +27,12 @@ import (
 // AppConfig holds all startup configurations
 type AppConfig struct {
 	Port                int
+	PBFTWSPort          int
+	PBOSWSPort          int
 	Verbose             bool
 	DataDir             string
+	ConfigDir           string // Added for consistency with Dockerfile
+	LogDir              string // Added for consistency with Dockerfile
 	SeedNodesStr        string
 	NodeTypeStr         string
 	BootstrapPeersStr   string
@@ -38,11 +42,35 @@ type AppConfig struct {
 	KeyPassphrase       string
 }
 
+func getEnvInt(key string, defaultValue int) int {
+	valStr := os.Getenv(key)
+	if valStr == "" {
+		return defaultValue
+	}
+	valInt, err := strconv.Atoi(valStr)
+	if err != nil {
+		log.Printf("Warning: Invalid integer value for %s: %s. Using default %d.", key, valStr, defaultValue)
+		return defaultValue
+	}
+	return valInt
+}
+
 func loadConfig() *AppConfig {
 	config := &AppConfig{}
-	flag.IntVar(&config.Port, "port", 3001, "Port to listen on")
-	flag.BoolVar(&config.Verbose, "verbose", true, "Enable detailed logging")
-	flag.StringVar(&config.DataDir, "datadir", "data", "Directory for blockchain data")
+	// Read from environment variables first, then use flags as overrides or for direct CLI usage
+	// Flags will keep their default values if corresponding ENV is not set.
+	// Then, ENV vars (if set) will override flag defaults.
+	// Finally, CLI flags (if provided) will override ENV vars. This is standard behavior.
+
+	flag.IntVar(&config.Port, "port", getEnvInt("API_PORT", 3002), "Port for the main HTTP API") // Changed default to 3002 as per Dockerfile
+	flag.IntVar(&config.PBFTWSPort, "pbftwsport", getEnvInt("PBFT_WS_PORT", 8546), "Port for PBFT WebSocket server")
+	flag.IntVar(&config.PBOSWSPort, "pboswstport", getEnvInt("PBOS_WS_PORT", 8547), "Port for pBOS WebSocket server")
+
+	flag.BoolVar(&config.Verbose, "verbose", (os.Getenv("VERBOSE") == "true" || os.Getenv("VERBOSE") == "1" || true), "Enable detailed logging") // Default true
+	flag.StringVar(&config.DataDir, "datadir", os.Getenv("DATA_DIR"), "Directory for blockchain data")
+	flag.StringVar(&config.ConfigDir, "configdir", os.Getenv("CONFIG_DIR"), "Directory for configuration files")
+	flag.StringVar(&config.LogDir, "logdir", os.Getenv("LOG_DIR"), "Directory for log files")
+
 	flag.StringVar(&config.SeedNodesStr, "seed", os.Getenv("SEED_NODES"), "Comma-separated list of seed nodes (HTTP addresses)")
 	flag.StringVar(&config.NodeTypeStr, "nodetype", os.Getenv("NODE_TYPE"), "Type of the node (e.g., validator, regular)")
 	flag.StringVar(&config.BootstrapPeersStr, "bootstrap", os.Getenv("BOOTSTRAP_PEERS"), "Comma-separated LibP2P bootstrap peer multiaddresses")
@@ -52,18 +80,49 @@ func loadConfig() *AppConfig {
 	config.IPScannerEnabled = scannerEnabledEnv == "true"
 
 	config.IPScanRangesStr = os.Getenv("IP_SCAN_RANGES")
-	config.IPScanTargetPortStr = os.Getenv("IP_SCAN_TARGET_PORT")
+	// P2P_PORT from Dockerfile is the base for some peer interactions, ensure this aligns.
+	// The p2p.Node uses config.Port (API_PORT) for its HTTP interactions and config.Port + 1000 for libp2p.
+	// IP_SCAN_TARGET_PORT should be the HTTP port of other nodes.
+	defaultScanTargetPort := getEnvInt("P2P_PORT", 3001) // Default to P2P_PORT for scanning, assuming it's the HTTP port of other nodes.
+	scanTargetPortStr := os.Getenv("IP_SCAN_TARGET_PORT")
+	if scanTargetPortStr != "" {
+		if port, err := strconv.Atoi(scanTargetPortStr); err == nil {
+			config.IPScanTargetPortStr = strconv.Itoa(port)
+		} else {
+			log.Printf("Warning: Invalid IP_SCAN_TARGET_PORT value: %s. Using default derived from P2P_PORT: %d", scanTargetPortStr, defaultScanTargetPort)
+			config.IPScanTargetPortStr = strconv.Itoa(defaultScanTargetPort)
+		}
+	} else {
+		config.IPScanTargetPortStr = strconv.Itoa(defaultScanTargetPort)
+	}
 
 	flag.Parse()
 
+	// Post-flag parsing checks for required ENVs if flags didn't provide them
+	if config.DataDir == "" {
+		config.DataDir = "data" // Default if not set by ENV or flag
+		utils.LogInfo("Data directory not specified, using default: %s", config.DataDir)
+	}
+	if config.ConfigDir == "" {
+		config.ConfigDir = "config" // Default
+		utils.LogInfo("Config directory not specified, using default: %s", config.ConfigDir)
+	}
+	if config.LogDir == "" {
+		config.LogDir = "logs" // Default
+		utils.LogInfo("Log directory not specified, using default: %s", config.LogDir)
+	}
+
 	if config.KeyPassphrase == "" {
-		log.Fatalf("Node key passphrase not provided. Set NODE_KEY_PASSPHRASE or use the -nodekeypass flag.")
+		log.Fatalf("Node key passphrase not provided. Set NODE_KEY_PASSPHRASE environment variable or use the -nodekeypass flag.")
 	}
 	return config
 }
 
 func main() {
-	appCtx, cancelApp := context.WithCancel(context.Background())
+	var err error // Declarar err al principio del scope de main
+	var appCtx context.Context
+	var cancelApp context.CancelFunc
+	appCtx, cancelApp = context.WithCancel(context.Background())
 	defer cancelApp()
 
 	// Attempt to load .env.test first, then .env
@@ -97,13 +156,32 @@ func main() {
 	utils.LogInfo("Application starting...")
 
 	// 3. Create Data Directories
+	// Ensure base data, config, and log dirs exist first, as they are defined as VOLUMES in Dockerfile
+	// and might be mounted from the host.
+	baseDirs := []string{config.DataDir, config.ConfigDir, config.LogDir}
+	for _, dir := range baseDirs {
+		if dir == "" { // Should not happen if defaults are set correctly in loadConfig
+			log.Fatalf("Critical error: A base directory path (DataDir, ConfigDir, or LogDir) is empty.")
+		}
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			log.Fatalf("Error creating base directory %s: %v", dir, err)
+		}
+	}
+
+	// Create subdirectories within the base data directory
 	txDataDir := config.DataDir + "/tx_chain"
 	criticalDataDir := config.DataDir + "/critical_chain"
-	if err := os.MkdirAll(txDataDir, 0755); err != nil {
-		log.Fatalf("Error creating transaction chain directory: %v", err)
-	}
-	if err := os.MkdirAll(criticalDataDir, 0755); err != nil {
-		log.Fatalf("Error creating critical chain directory: %v", err)
+	keysDataDir := config.DataDir + "/keys"
+
+	appSpecificDirs := []string{txDataDir, criticalDataDir, keysDataDir}
+	for _, dir := range appSpecificDirs {
+		mode := os.FileMode(0755)
+		if dir == keysDataDir {
+			mode = 0700 // Stricter permissions for keys
+		}
+		if err := os.MkdirAll(dir, mode); err != nil {
+			log.Fatalf("Error creating application specific directory %s: %v", dir, err)
+		}
 	}
 
 	// 4. Initialize Core Application Components
@@ -206,11 +284,12 @@ func main() {
 
 	// 6. Initialize P2P Server
 	// LLM Service Initialization (assuming it's needed for the server)
-	llmConfig, err := llm.LoadLLMConfig("llm/config.json")
+	var llmConfig llm.LLMConfig                           // Declarar llmConfig explícitamente como tipo valor
+	llmConfig, err = llm.LoadLLMConfig("llm/config.json") // Asignar con =, err ya está declarada
 	if err != nil {
 		log.Fatalf("FATAL: Failed to load LLM configuration: %v", err)
 	}
-	localLLMClient := llm.NewLocalLLMClient(llmConfig)
+	localLLMClient := llm.NewLocalLLMClient(llmConfig) // llmConfig es llm.LLMConfig (valor)
 	if localLLMClient == nil {
 		log.Fatalf("FATAL: Failed to create LocalLLMClient.")
 	}

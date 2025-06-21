@@ -124,7 +124,6 @@ var (
 		[]string{"target_address"},
 	)
 
-
 	// Reputation System Metrics
 	ReputationScoreHistogram = promauto.NewHistogram(
 		prometheus.HistogramOpts{

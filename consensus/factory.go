@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"tripcodechain_go/currency"
 	"tripcodechain_go/pkg/consensus_events"
-	"tripcodechain_go/pkg/validation" // Added for validation.NewDPoS
 	"tripcodechain_go/pkg/consensus_types" // Added for consensus_types.ConsensusType
+	"tripcodechain_go/pkg/validation"      // Added for validation.NewDPoS
 )
 
 // NewConsensus crea una nueva instancia de consenso del tipo especificado

@@ -41,8 +41,8 @@ package consensus
 // So, this file should be empty.
 
 import (
-	// Imports might be needed if there are any DPoS specific types
-	// that are part of the `consensus` package itself and used by other
-	// consensus algorithms or the factory in a generic way.
-	// For now, assuming all DPoS specific logic is in `validation`.
+// Imports might be needed if there are any DPoS specific types
+// that are part of the `consensus` package itself and used by other
+// consensus algorithms or the factory in a generic way.
+// For now, assuming all DPoS specific logic is in `validation`.
 )
