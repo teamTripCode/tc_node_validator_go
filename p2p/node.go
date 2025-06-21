@@ -480,7 +480,8 @@ func (n *Node) RegisterWithNode(seedNodeAddress string, libp2pBootstrapPeers []s
 	// For now, a single attempt is made.
 	if success := n.attemptHttpRegistration(seedNodeAddress, requestBodyBytes, 1); success {
 		utils.LogInfo("Registration attempt with %s was successful.", seedNodeAddress)
-		// Peer processing is handled within attemptHttpRegistration
+		// After successful registration, fetch active nodes from the seed node.
+		n.fetchAndProcessActiveNodes(seedNodeAddress)
 	} else {
 		utils.LogInfo("Registration attempt with %s failed.", seedNodeAddress)
 		// Consider if any specific fallback or error handling is needed here.
@@ -525,16 +526,66 @@ func (n *Node) attemptHttpRegistration(seedNodeAddress string, requestBodyBytes 
 		return false
 	}
 
-	utils.LogInfo("Successfully registered with %s (attempt %d). Received %d peers.", seedNodeAddress, attempt, len(receivedPeers))
+	utils.LogInfo("Successfully registered with %s (attempt %d). Received %d peers from /register endpoint.", seedNodeAddress, attempt, len(receivedPeers))
 	for _, peerStatus := range receivedPeers {
 		if peerStatus.Address == n.ID { // Don't add self
 			continue
 		}
-		utils.LogInfo("Discovered peer %s (type: %s) via registration with %s", peerStatus.Address, peerStatus.NodeType, seedNodeAddress)
+		utils.LogInfo("Discovered peer %s (type: %s) via /register response from %s", peerStatus.Address, peerStatus.NodeType, seedNodeAddress)
 		// Assuming AddNodeStatus handles metrics like ValidatorsAdded internally if applicable
 		n.AddNodeStatus(peerStatus)
 	}
 	return true
+}
+
+// fetchAndProcessActiveNodes fetches active nodes from the seed's /nodes/active endpoint and adds them.
+func (n *Node) fetchAndProcessActiveNodes(seedNodeAddress string) {
+	utils.LogInfo("Fetching active nodes from seed node %s via /nodes/active", seedNodeAddress)
+	client := &http.Client{Timeout: 10 * time.Second}
+	url := fmt.Sprintf("http://%s/nodes/active", seedNodeAddress)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		utils.LogError("Failed to create request for /nodes/active for %s: %v", seedNodeAddress, err)
+		return
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		utils.LogError("Failed to send request to %s/nodes/active: %v", seedNodeAddress, err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		utils.LogError("Fetching active nodes from %s/nodes/active failed: status %s", seedNodeAddress, resp.Status)
+		return
+	}
+
+	var activeValidatorNodes []ValidatorNode
+	if err := json.NewDecoder(resp.Body).Decode(&activeValidatorNodes); err != nil {
+		utils.LogError("Failed to decode /nodes/active response from %s: %v", seedNodeAddress, err)
+		return
+	}
+
+	utils.LogInfo("Successfully fetched %d active nodes from %s/nodes/active.", len(activeValidatorNodes), seedNodeAddress)
+	for _, vNode := range activeValidatorNodes {
+		if vNode.Address == n.ID { // Don't add self
+			continue
+		}
+		// Convert ValidatorNode to NodeStatus
+		// Note: ValidatorNode has LastSeen (string), IsResponding (bool), Version (string)
+		// NodeStatus only has Address and NodeType. We primarily care about these for AddNodeStatus.
+		// The additional fields from ValidatorNode might be used for more advanced logic in the future,
+		// but for now, direct conversion to NodeStatus is sufficient for peer discovery.
+		nodeStatus := NodeStatus{
+			Address:  vNode.Address,
+			NodeType: vNode.NodeType,
+		}
+
+		utils.LogInfo("Processing active node %s (type: %s) from %s/nodes/active", nodeStatus.Address, nodeStatus.NodeType, seedNodeAddress)
+		n.AddNodeStatus(nodeStatus) // This will add to n.knownNodes
+	}
 }
 
 // AddNode ensures a node with the given address is in knownNodes.
