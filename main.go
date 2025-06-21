@@ -14,12 +14,14 @@ import (
 	"time"
 
 	"tripcodechain_go/blockchain"
-	"tripcodechain_go/consensus" // Still needed for consensus.NewConsensus, consensus.Consensus interface
+	"tripcodechain_go/consensus"
 	"tripcodechain_go/llm"
 	"tripcodechain_go/mempool"
 	"tripcodechain_go/p2p"
-	"tripcodechain_go/pkg/validation" // Added for validation.DPoS, validation.ValidatorInfo
+	"tripcodechain_go/pkg/validation"
 	"tripcodechain_go/utils"
+
+	"github.com/joho/godotenv"
 )
 
 // AppConfig holds all startup configurations
@@ -63,6 +65,26 @@ func loadConfig() *AppConfig {
 func main() {
 	appCtx, cancelApp := context.WithCancel(context.Background())
 	defer cancelApp()
+
+	// Attempt to load .env.test first, then .env
+	// This allows for overriding .env with .env.test if present
+	if _, err := os.Stat(".env.test"); err == nil {
+		err = godotenv.Load(".env.test")
+		if err != nil {
+			log.Printf("Warning: Error loading .env.test file: %v", err)
+		} else {
+			log.Println("Successfully loaded .env.test file")
+		}
+	} else if _, err := os.Stat(".env"); err == nil {
+		err = godotenv.Load(".env")
+		if err != nil {
+			log.Printf("Warning: Error loading .env file: %v", err)
+		} else {
+			log.Println("Successfully loaded .env file")
+		}
+	} else {
+		log.Println("No .env or .env.test file found, using environment variables or defaults.")
+	}
 
 	// 1. Load Configuration
 	config := loadConfig()

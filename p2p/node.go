@@ -48,6 +48,15 @@ const (
 	GossipEventFullSync        GossipEventType = "FULL_SYNC"
 )
 
+// ValidatorNode defines the structure for active validator nodes received from a seed node.
+type ValidatorNode struct {
+	Address      string `json:"address"`
+	NodeType     string `json:"nodeType"`
+	LastSeen     string `json:"lastSeen"` // Should be parsed to time.Time or int64 if used
+	IsResponding bool   `json:"isResponding"`
+	Version      string `json:"version,omitempty"`
+}
+
 type NodeInfo struct {
 	Address  string `json:"address"`
 	LastSeen int64  `json:"lastSeen"`
