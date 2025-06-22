@@ -15,7 +15,7 @@ import (
 
 	"tripcodechain_go/blockchain"
 	"tripcodechain_go/consensus"
-	"tripcodechain_go/llm"
+	"tripcodechain_go/expert_system" // Reemplazar llm con expert_system
 	"tripcodechain_go/mempool"
 	"tripcodechain_go/p2p"
 	"tripcodechain_go/pkg/validation"
@@ -283,25 +283,25 @@ func main() {
 	utils.LogInfo("Node Type: %s", node.NodeType)
 
 	// 6. Initialize P2P Server
-	// LLM Service Initialization (assuming it's needed for the server)
-	var llmConfig llm.LLMConfig                           // Declarar llmConfig explícitamente como tipo valor
-	llmConfig, err = llm.LoadLLMConfig("llm/config.json") // Asignar con =, err ya está declarada
+	// Expert System Initialization
+	ruleEngine := expert_system.NewRuleEngine()
+	err = ruleEngine.LoadRules("expert_system/rules.json") // err ya está declarada
 	if err != nil {
-		log.Fatalf("FATAL: Failed to load LLM configuration: %v", err)
-	}
-	localLLMClient := llm.NewLocalLLMClient(llmConfig) // llmConfig es llm.LLMConfig (valor)
-	if localLLMClient == nil {
-		log.Fatalf("FATAL: Failed to create LocalLLMClient.")
+		log.Fatalf("FATAL: Error al cargar las reglas del sistema experto: %v", err)
 	}
 
-	p2pServer := p2p.NewServer(node, txChain, criticalChain, txMempool, criticalMempool, nil, localLLMClient, dposInstance)
-	llmService := llm.NewDistributedLLMService(p2pServer)
-	p2pServer.LLMService = llmService
-	llmAPIHandler := llm.NewLLMAPIHandler(llmService)
-	p2pServer.SetupRoutes()                              // P2P routes
-	if llmAPIHandler != nil && p2pServer.Router != nil { // LLM routes
-		p2pServer.Router.HandleFunc("/api/v1/llm/query", llmAPIHandler.HandleQuery).Methods("POST")
+	localExpertProcessor := expert_system.NewLocalExpertSystemProcessor(ruleEngine)
+	if localExpertProcessor == nil {
+		log.Fatalf("FATAL: Error al crear LocalExpertSystemProcessor.")
 	}
+
+	// Pasar localExpertProcessor al servidor P2P. El parámetro llmService (que era nil) se elimina.
+	p2pServer := p2p.NewServer(node, txChain, criticalChain, txMempool, criticalMempool, localExpertProcessor, dposInstance)
+
+	// Configurar rutas. La API para el sistema experto ahora se maneja a través de /mcp/query.
+	// Ya no hay un LLMAPIHandler separado ni una ruta /api/v1/llm/query.
+	// La funcionalidad de consulta se centraliza en /mcp/query que ahora usa el sistema experto.
+	p2pServer.SetupRoutes() // Configura todas las rutas, incluyendo /mcp/query
 
 	// 7. Start P2P Background Services
 	if node.Libp2pHost != nil { // Check if Libp2pHost was initialized
