@@ -42,7 +42,7 @@ func TestRuleEngine_LoadAndEvaluate(t *testing.T) {
 ]`
 	rulesFilePath := setupTestRulesFile(t, rulesContent)
 
-	engine := NewRuleEngine()
+	engine := NewRuleEngine(nil) // Use NilFallbackProcessor for default test behavior
 	err := engine.LoadRules(rulesFilePath)
 	if err != nil {
 		t.Fatalf("Failed to load rules: %v", err)
@@ -128,28 +128,61 @@ func TestRuleEngine_LoadAndEvaluate(t *testing.T) {
 }
 
 func TestRuleEngine_NoRulesLoaded(t *testing.T) {
-	engine := NewRuleEngine() // No rules loaded
+	engine := NewRuleEngine(nil) // Use NilFallbackProcessor
+	// With NilFallbackProcessor, Evaluate should still return an error if no rules are loaded.
+	// The error comes from the initial check in Evaluate or from the NilFallbackProcessor itself if rules are empty.
 	_, err := engine.Evaluate(QueryInput{InputText: "test"})
 	if err == nil {
 		t.Error("Expected error when no rules are loaded, got nil")
+	} else {
+		// Check if it's the specific error type
+		if esErr, ok := err.(*ExpertSystemError); ok {
+			if esErr.Type != ErrorTypeRuleLoading && esErr.Type != ErrorTypeNoRuleMatched { // NoRuleMatched if NilFallback is hit
+				t.Errorf("Expected ErrorTypeRuleLoading or ErrorTypeNoRuleMatched, got %s", esErr.Type)
+			}
+		} else {
+			t.Errorf("Expected ExpertSystemError, got %T", err)
+		}
 	}
 }
 
 func TestRuleEngine_LoadRules_FileNotFound(t *testing.T) {
-	engine := NewRuleEngine()
+	engine := NewRuleEngine(nil)
 	err := engine.LoadRules("nonexistent_rules.json")
 	if err == nil {
 		t.Error("Expected error when loading non-existent rules file, got nil")
 	}
+	// Here, err is from os.ReadFile, not yet an ExpertSystemError unless LoadRules wraps it.
+	// TODO: Modify LoadRules to return ExpertSystemError(ErrorTypeRuleLoading, ...).Wrap(err)
 }
 
 func TestRuleEngine_LoadRules_InvalidJSON(t *testing.T) {
 	invalidJSONContent := `[{"id": "BAD_RULE", "priority": "not_a_number"}]` // Priority should be int
 	rulesFilePath := setupTestRulesFile(t, invalidJSONContent)
 
-	engine := NewRuleEngine()
+	engine := NewRuleEngine(nil)
 	err := engine.LoadRules(rulesFilePath)
 	if err == nil {
 		t.Error("Expected error when loading invalid JSON rules file, got nil")
+	}
+	// Similar to above, LoadRules should wrap this json error.
+}
+
+func TestRuleEngine_WithDefaultFallback(t *testing.T) {
+	engine := NewRuleEngine(NewDefaultFallbackProcessor()) // Use DefaultFallbackProcessor
+
+	// No rules loaded, so evaluation should use fallback.
+	input := QueryInput{InputText: "trigger fallback"}
+	result, err := engine.Evaluate(input)
+
+	if err != nil {
+		t.Fatalf("Expected no error when using DefaultFallbackProcessor, but got: %v", err)
+	}
+	if result.RuleID != "FALLBACK_DEFAULT_001" {
+		t.Errorf("Expected fallback rule ID 'FALLBACK_DEFAULT_001', got '%s'", result.RuleID)
+	}
+	expectedPayload := "We are unable to process your request with the current expert system rules. Please try again later or contact support."
+	if result.ResponsePayload != expectedPayload {
+		t.Errorf("Expected fallback payload '%s', got '%v'", expectedPayload, result.ResponsePayload)
 	}
 }
