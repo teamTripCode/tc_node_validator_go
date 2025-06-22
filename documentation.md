@@ -12,10 +12,9 @@ go run main.go -port=3000 -verbose=true -datadir=data -seed=localhost:3001
     *   [Network Resilience](#network-resilience)
     *   [Monitoring](#monitoring)
     *   [Key Configuration Variables](#key-configuration-variables)
-2.  [MCP and Distributed LLM Service Configuration](#mcp-and-distributed-llm-service-configuration)
-    *   [MCP ConfigMap (`mcp-config`)](#mcp-configmap-mcp-config)
-    *   [Environment Variables (MCP/LLM)](#environment-variables-mcpllm)
-    *   [Distributed LLM Service API](#distributed-llm-service-api)
+2.  [MCP and Expert System Configuration](#mcp-and-expert-system-configuration)
+    *   [Expert System Rules (`expert_system/rules.json`)](#expert-system-rules-expert_systemrulesjson)
+    *   [MCP Query API for Expert System](#mcp-query-api-for-expert-system)
 3.  [Unit Test Candidates](#unit-test-candidates)
 
 
@@ -205,88 +204,121 @@ This section lists key functions and areas that are good candidates for unit tes
 This list provides a good starting point for ensuring the reliability of the new P2P features. Integration tests will also be crucial to verify the interplay between these components.
 
 ---
-## 2. MCP and Distributed LLM Service Configuration
+## 2. MCP and Expert System Configuration
 
-This section details the configuration options for the Model Context Protocol (MCP) and the Distributed LLM Service.
+With the removal of the Distributed LLM Service, the MCP functionality is now primarily focused on providing an interface for the local Expert System. The complex distributed query orchestration and aggregation logic related to LLMs have been removed.
 
-### MCP ConfigMap (`mcp-config`)
+### Expert System Rules (`expert_system/rules.json`)
 
-The primary configuration for MCP and the associated LLM services is managed through a Kubernetes ConfigMap named `mcp-config`. This ConfigMap is typically mounted into the validator node pods.
+The core logic for query processing is now defined by a set of rules in the `expert_system/rules.json` file. This file is loaded by each node at startup.
 
--   **Purpose**: To provide runtime configuration for the MCP server integrated within each node and for the Distributed LLM Service that orchestrates queries across MCP-enabled nodes.
--   **Location**: Defined in `k8s/mcp-configmap.yaml`. This file is deployed to the Kubernetes cluster.
--   **Mounted File**: The `data` section of the ConfigMap contains a key `config.json`. The content of this key is mounted as a file at `/etc/tripcodechain/mcp/config.json` within the validator node's container (this path is specified by the `MCP_CONFIG_PATH` environment variable).
+-   **Purpose**: To define how the node should respond to different types of queries based on their content.
+-   **Location**: `expert_system/rules.json` within the project structure. This file should be deployed with the application.
+-   **Format**: JSON array of rule objects.
 
-#### Example `config.json` Keys:
+#### Rule Structure:
+
+Each rule object has the following structure:
 
 ```json
 {
-  "mcpServiceEnabled": true,
-  "defaultQueryTimeoutSeconds": 10,
-  "maxConcurrentQueriesPerNode": 5,
-  "logLevel": "INFO",
-  "llmService": {
-    "minResponsesForAggregation": 1,
-    "responseAggregationStrategy": "firstValid"
-  },
-  "nodeBlacklist": [
-    "node-id-to-blacklist-1",
-    "node-id-to-blacklist-2"
-  ]
+  "id": "RULE_ID_001",
+  "description": "A human-readable description of the rule.",
+  "priority": 100, // Higher number means higher priority
+  "conditions": [
+    // Array of Condition objects
+    {
+      "fact": "InputText", // Key from the input query (or "InputText" directly)
+      "operator": "contains", // e.g., "equals", "contains", "gt", "lt", "matches_regex", "evaluate_gval"
+      "value": "some_value" // Value to compare against or gval expression
+    }
+  ],
+  "action": {
+    // Action object
+    "type": "generate_response", // Type of action, e.g., "generate_response"
+    "responsePayload": "This is the response payload.", // Payload for the action
+    "parameters": { // Optional parameters for the action
+      "param1": "value1"
+    }
+  }
 }
 ```
 
--   **`mcpServiceEnabled` (boolean)**: Enables or disables the MCP service on the node.
--   **`defaultQueryTimeoutSeconds` (integer)**: Default timeout in seconds for queries initiated by the Distributed LLM Service.
--   **`maxConcurrentQueriesPerNode` (integer)**: Limits how many MCP queries this node will process concurrently from other nodes.
--   **`logLevel` (string)**: Sets the logging level for MCP and LLM service components (e.g., "DEBUG", "INFO", "WARN", "ERROR"). This might be overridden by global log settings.
--   **`llmService.minResponsesForAggregation` (integer)**: The minimum number of responses the Distributed LLM Service should wait for before attempting aggregation (unless timeout occurs first).
--   **`llmService.responseAggregationStrategy` (string)**: The strategy used to aggregate responses from multiple MCP nodes (e.g., "firstValid", "majorityConsensus", "averageNumerical").
--   **`nodeBlacklist` (array of strings)**: A list of MCP Node IDs from which this node will ignore or reject queries.
+-   **`id` (string)**: A unique identifier for the rule.
+-   **`description` (string)**: A human-readable description of what the rule does.
+-   **`priority` (integer)**: Determines the order of evaluation. Rules with higher priority are evaluated first.
+-   **`conditions` (array of Condition objects)**: All conditions in this array must evaluate to true for the rule to be triggered.
+    *   **`fact` (string)**: The piece of data from the input query to evaluate. This can be `InputText` (for the main text part of the query) or a key from the `factMap` in the query payload.
+    *   **`operator` (string)**: The comparison operator. Supported operators include:
+        *   `equals`: Case-insensitive string equality or direct equality for other types.
+        *   `not_equals`: Inverse of `equals`.
+        *   `contains`: Case-insensitive substring check for strings.
+        *   `starts_with`: Case-insensitive prefix check for strings.
+        *   `ends_with`: Case-insensitive suffix check for strings.
+        *   `gt` (or `greater_than`): For numerical comparison (`fact > value`).
+        *   `lt` (or `less_than`): For numerical comparison (`fact < value`).
+        *   `evaluate_gval`: Evaluates the `value` field as a [gval](https
+            ://github.com/PaesslerAG/gval) expression. The context for gval includes all keys from the input `factMap`. Example: `"value > 100 && data.type == 'critical'"`.
+        *   *(Future operators like `matches_regex` can be added.)*
+    *   **`value` (any)**: The value to compare the `fact` against, or the gval expression string.
+-   **`action` (Action object)**: Defines what to do if the rule is triggered.
+    *   **`type` (string)**: The type of action (e.g., `generate_response`). This can be used by the system to understand how to interpret the action.
+    *   **`responsePayload` (any)**: The payload to be returned as part of the response if this action is chosen.
+    *   **`parameters` (object, optional)**: Additional parameters associated with the action.
 
-### Environment Variables
+#### Example Rules:
 
-The following environment variables are used by the validator node to configure its MCP and Distributed LLM service components:
+(Refer to `expert_system/rules.json` for concrete examples including simple greetings, regex matching, and gval expressions.)
 
--   **`MCP_LOG_LEVEL`**: Overrides the `logLevel` from `config.json` if set. Sets the logging level for MCP components.
-    *   Example: `INFO`
--   **`MCP_CONFIG_PATH`**: Specifies the absolute path to the MCP configuration file (mounted from the ConfigMap).
-    *   Example: `/etc/tripcodechain/mcp/config.json`
+### MCP Query API for Expert System
 
-### Distributed LLM Service API
+The primary way to interact with the node's Expert System is via the MCP query endpoint. The distributed LLM API (`/api/v1/llm/query`) has been removed.
 
-The Distributed LLM Service exposes an API endpoint for initiating queries across the MCP network.
-
--   **Endpoint**: `POST /api/v1/llm/query`
--   **Request Payload (JSON)**: The client should send a JSON object detailing the query.
+-   **Endpoint**: `POST /mcp/query`
+    *   This endpoint is now handled by `p2p.Server.HandleMCPQuery`, which internally uses the `LocalExpertSystemProcessor`.
+-   **Request Payload (JSON)**:
+    The client sends an `MCPQuery` structure, where the `Payload` field itself should be a JSON string that can be unmarshalled into `expert_system.QueryInput`.
+    ```json
+    // Outer MCPQuery structure (simplified for this example)
+    {
+      "QueryID": "client-generated-uuid",
+      "Timestamp": 1678886400,
+      "OriginNodeID": "client-node-id", // Can be an identifier for the client
+      // "Signature": { ... } // Optional signature
+      "Payload": "{\"inputText\": \"hola\", \"factMap\": {\"department\": \"support\"}}" // JSON string
+    }
+    ```
+    The `Payload` string, when unmarshalled, should look like this (`expert_system.QueryInput`):
     ```json
     {
-      "prompt": "Translate the following English text to French: 'Hello, world.'",
-      "model": "optional-model-identifier", // Optional: specify a target model or type
-      "parameters": { // Optional: any additional parameters for the LLM
-        "temperature": 0.7
+      "inputText": "hola", // Main text for evaluation by rules using the "InputText" fact
+      "factMap": {         // Additional structured data for rule evaluation
+        "department": "support",
+        "urgency": 5
       }
     }
     ```
-    *   `prompt` (string, required): The actual query or prompt to be sent to the LLMs.
-    *   `model` (string, optional): A specific model identifier or type that the querying node requests. MCP servers can use this to route to the appropriate local model.
-    *   `parameters` (object, optional): Additional parameters to be passed to the underlying LLM.
+    *   `inputText` (string): The primary text input for the expert system. Rules can refer to this using the fact name `InputText`.
+    *   `factMap` (object, optional): A map of additional key-value pairs (facts) that can be used in rule conditions.
 
--   **Response Payload (JSON)**: The API responds with a JSON array of `p2p.MCPResponse` objects collected from the participating MCP nodes, or potentially a single aggregated response if server-side aggregation is implemented for this endpoint.
+-   **Response Payload (JSON)**:
+    The API directly responds with the `expert_system.ActionResult` produced by the local rule engine.
     ```json
-    [
-      {
-        "queryId": "uuid-of-the-original-query",
-        "timestamp": 1678886400,
-        "originNodeId": "node-id-of-original-querier",
-        "responderNodeId": "node-id-of-this-mcp-responder",
-        "payload": "base64-encoded-response-payload-or-json-string", // Actual LLM response
-        "signature": {
-          "nodeId": "node-id-of-this-mcp-responder",
-          "signature": "signature-of-the-response"
-        }
-      }
-      // ... more responses
-    ]
+    {
+      "actionType": "generate_response", // From the matched rule's action
+      "responsePayload": "¡Hola! ¿En qué puedo ayudarte hoy?", // From the matched rule's action
+      "parameters": null, // Or parameters from the rule's action
+      "ruleId": "MSG_ES_001" // ID of the rule that was triggered
+    }
     ```
-    If an error occurs during the query process (e.g., timeout before any responses, internal error), an appropriate JSON error object will be returned.
+    If no rule matches, or an error occurs during processing, a JSON error object is returned:
+    ```json
+    {
+      "error": "failed to process query with rule engine",
+      "details": "no rule matched for the input" // Or other error details
+    }
+    ```
+
+-   **Environment Variables**:
+    *   The `MCP_LOG_LEVEL` and `MCP_CONFIG_PATH` environment variables are no longer directly relevant as the `mcp-config` ConfigMap and its complex LLM-specific configurations have been removed. Logging is now controlled by the global `-verbose` flag or `VERBOSE` environment variable.
+    *   The path to the rules file (`expert_system/rules.json`) is currently hardcoded in `main.go` during `RuleEngine` initialization. If this needs to be configurable, an environment variable (e.g., `EXPERT_SYSTEM_RULES_PATH`) could be introduced.

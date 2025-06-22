@@ -31,8 +31,7 @@ type Server struct {
 	TxMempool       *mempool.Mempool
 	CriticalMempool *mempool.Mempool
 	NodeMgr         *NodeManager         // Added NodeManager
-	LLMService      MCPResponseProcessor // Changed to interface
-	localLLM        LocalLLMProcessor    // Changed to interface
+	localProcessor  LocalQueryProcessor  // Replaces localLLM
 	DPoS            *validation.DPoS     // Changed DPoS field type
 	httpServer      *http.Server         // Added for graceful shutdown
 }
@@ -40,7 +39,7 @@ type Server struct {
 // NewServer creates a new server instance
 func NewServer(node *Node, txChain *blockchain.Blockchain, criticalChain *blockchain.Blockchain,
 	txMempool *mempool.Mempool, criticalMempool *mempool.Mempool,
-	llmService MCPResponseProcessor, localLLMClient LocalLLMProcessor, dpos *validation.DPoS) *Server { // Changed dpos parameter type
+	localProc LocalQueryProcessor, dpos *validation.DPoS) *Server { // Removed llmService, renamed localLLMClient
 
 	server := &Server{
 		Router:          mux.NewRouter(),
@@ -50,12 +49,11 @@ func NewServer(node *Node, txChain *blockchain.Blockchain, criticalChain *blockc
 		CriticalChain:   criticalChain,
 		TxMempool:       txMempool,
 		CriticalMempool: criticalMempool,
-		LLMService:      llmService,     // LLMService (MCPResponseProcessor) is set here
-		localLLM:        localLLMClient, // Initialize localLLM
+		localProcessor:  localProc,      // Initialize localProcessor
 		DPoS:            dpos,           // Store DPoS instance
 	}
 
-	// server.setupRoutes() // setupRoutes will be called from main after LLMAPIHandler is created
+	// server.setupRoutes() // setupRoutes will be called from main
 	return server
 }
 
@@ -108,7 +106,7 @@ func (s *Server) SetupRoutes() { // llmAPIHandler parameter removed
 
 	// MCP routes
 	s.Router.HandleFunc("/mcp/query", s.HandleMCPQuery).Methods("POST")
-	s.Router.HandleFunc("/mcp/response", s.HandleMCPResponse).Methods("POST")
+	// La ruta /mcp/response ha sido eliminada ya que HandleMCPResponse fue removido.
 
 	// Heartbeat endpoint
 	s.Router.HandleFunc("/heartbeat", s.HeartbeatHandler).Methods("POST")
@@ -227,77 +225,38 @@ func (s *Server) HandleMCPQuery(w http.ResponseWriter, r *http.Request) {
 		utils.LogInfo("Firma ausente para MCPQuery: QueryID=%s", query.QueryID)
 	}
 
-	// Lógica de procesamiento de la consulta (placeholder)
-	if s.localLLM != nil {
-		llmResponsePayload, err := s.localLLM.QueryLLM(query.Payload)
+	// Lógica de procesamiento de la consulta con el sistema experto
+	if s.localProcessor != nil {
+		responsePayload, err := s.localProcessor.ProcessQuery(query.Payload)
 		if err != nil {
-			utils.LogError("Failed to process MCPQuery %s with local LLM: %v", query.QueryID, err)
-			// Still send HTTP OK because the query was received, but no MCPResponse will be sent.
-		} else {
-			utils.LogInfo("MCPQuery %s processed successfully by local LLM.", query.QueryID)
-
-			// Construct MCPResponse
-			mcpResponse := &MCPResponse{
-				QueryID:         query.QueryID,
-				Timestamp:       time.Now().Unix(),
-				OriginNodeID:    query.OriginNodeID, // This should be the original querier
-				ResponderNodeID: s.Node.ID,          // This node is responding
-				Payload:         llmResponsePayload,
-				// Signature would be calculated here if implemented
-				// Signature: s.Node.SignData(mcpResponse.SignableData()) // Placeholder for signing
-			}
-
-			// For now, log the response instead of sending it back via P2P
-			responseJSON, _ := json.Marshal(mcpResponse) // Error handling omitted for brevity in log
-			utils.LogInfo("MCPResponse prepared for QueryID %s: %s", query.QueryID, string(responseJSON))
-
-			// TODO: Implement actual P2P sending of MCPResponse to query.OriginNodeID
-			// Example: err := s.SendMCPResponse(query.OriginNodeID, mcpResponse)
-			// if err != nil {
-			//    utils.LogError("Failed to send MCPResponse for QueryID %s to %s: %v", query.QueryID, query.OriginNodeID, err)
-			// }
+			utils.LogError("Error al procesar MCPQuery %s con el procesador local: %v", query.QueryID, err)
+			http.Error(w, "Error processing query: "+err.Error(), http.StatusInternalServerError)
+			return
 		}
+		utils.LogInfo("MCPQuery %s procesado exitosamente por el procesador local.", query.QueryID)
+
+		// Construir MCPResponse (o una respuesta genérica si MCPResponse ya no es el formato estándar)
+		// Por ahora, asumimos que la respuesta del procesador local es el payload final para el cliente HTTP.
+		// Si se necesita enviar una respuesta MCP a través de P2P, esa lógica se mantendría aquí.
+		// Sin embargo, el plan es simplificar y eliminar la parte distribuida de LLM/reglas.
+		// Así que la respuesta es directamente para el cliente que hizo la solicitud HTTP.
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if _, err := w.Write(responsePayload); err != nil {
+			utils.LogError("Error escribiendo respuesta para MCPQuery %s: %v", query.QueryID, err)
+		}
+		return
 	} else {
-		utils.LogInfo("Local LLM client not configured, MCPQuery %s cannot be processed locally.", query.QueryID)
-	}
-
-	w.WriteHeader(http.StatusOK)
-	// Respond with a simple confirmation message or the processed data
-	if _, err := w.Write([]byte("MCPQuery recibido con éxito")); err != nil { //TODO: Consider if response should change based on LLM outcome
-		utils.LogError("Error escribiendo respuesta para MCPQuery: %v", err)
-	}
-}
-
-// HandleMCPResponse maneja las respuestas MCP entrantes.
-func (s *Server) HandleMCPResponse(w http.ResponseWriter, r *http.Request) {
-	var response MCPResponse
-	if err := json.NewDecoder(r.Body).Decode(&response); err != nil {
-		utils.LogError("Error decodificando MCPResponse: %v", err)
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		utils.LogError("Procesador local no configurado, MCPQuery %s no puede ser procesado.", query.QueryID)
+		http.Error(w, "Local processor not available", http.StatusInternalServerError)
 		return
 	}
-	defer r.Body.Close()
-
-	utils.LogInfo("MCPResponse recibido: QueryID=%s, ResponderNodeID=%s", response.QueryID, response.ResponderNodeID)
-
-	// Placeholder para verificación de firma
-	if response.Signature.NodeID != "" && response.Signature.Signature != "" {
-		utils.LogDebug("Firma presente para MCPResponse: QueryID=%s, NodeID=%s", response.QueryID, response.Signature.NodeID)
-		// Aquí iría la lógica de verificación de la firma
-	} else {
-		utils.LogInfo("Firma ausente para MCPResponse: QueryID=%s", response.QueryID)
-	}
-
-	// Lógica de procesamiento de la respuesta (placeholder)
-	if s.LLMService != nil {
-		s.LLMService.ProcessIncomingResponse(&response)
-	} else {
-		utils.LogInfo("LLMService not initialized in P2P server, cannot process MCPResponse further.")
-	}
-
-	w.WriteHeader(http.StatusOK)
-	// Respond with a simple confirmation message or the processed data
-	if _, err := w.Write([]byte("MCPResponse recibido con éxito y procesado por LLMService si disponible")); err != nil {
-		utils.LogError("Error escribiendo respuesta para MCPResponse: %v", err)
-	}
 }
+
+// HandleMCPResponse ya no es necesario ya que el DistributedLLMService y su lógica de
+// recepción de respuestas distribuidas se eliminarán. El procesamiento de consultas
+// ahora es local y determinístico a través del sistema experto.
+// Si se mantiene alguna forma de comunicación P2P para otros tipos de mensajes MCP,
+// se necesitaría un handler diferente o una refactorización de este.
+// Por ahora, se elimina.

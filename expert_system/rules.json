@@ -1,0 +1,92 @@
+[
+  {
+    "id": "MSG_EN_001",
+    "description": "Responde a un saludo simple en inglés.",
+    "priority": 100,
+    "conditions": [
+      {
+        "fact": "InputText",
+        "operator": "contains",
+        "value": "hello"
+      }
+    ],
+    "action": {
+      "type": "generate_response",
+      "responsePayload": "Hello there! How can I help you today?"
+    }
+  },
+  {
+    "id": "MSG_ES_001",
+    "description": "Responde a un saludo simple en español.",
+    "priority": 100,
+    "conditions": [
+      {
+        "fact": "InputText",
+        "operator": "contains",
+        "value": "hola"
+      }
+    ],
+    "action": {
+      "type": "generate_response",
+      "responsePayload": "¡Hola! ¿En qué puedo ayudarte hoy?"
+    }
+  },
+  {
+    "id": "QUERY_STATUS_001",
+    "description": "Responde a una pregunta sobre el estado del sistema.",
+    "priority": 90,
+    "conditions": [
+      {
+        "fact": "InputText",
+        "operator": "matches_regex",
+        "value": "(?i)(c[oó]mo est[aá]s|cu[aá]l es tu estado|status)"
+      }
+    ],
+    "action": {
+      "type": "generate_response",
+      "responsePayload": "Estoy funcionando correctamente, gracias por preguntar."
+    }
+  },
+  {
+    "id": "FACTMAP_COMPLEX_RULE_001",
+    "description": "Regla que usa FactMap con gval para lógica más compleja.",
+    "priority": 110,
+    "conditions": [
+      {
+        "fact": "userRole",
+        "operator": "equals",
+        "value": "admin"
+      },
+      {
+        "fact": "requestType",
+        "operator": "equals",
+        "value": "sensitive_action"
+      },
+      {
+        "fact": "data.value",  // Asumiendo que el fact 'data' es un mapa con una clave 'value'
+        "operator": "evaluate_gval", // Usamos gval para evaluar una expresión en el contexto
+        "value": "data.value > 100 && data.value < 200" // La expresión gval
+      }
+    ],
+    "action": {
+      "type": "generate_response",
+      "responsePayload": "Acción sensible permitida para administrador con valor entre 100 y 200."
+    }
+  },
+  {
+    "id": "DEFAULT_FALLBACK_001",
+    "description": "Respuesta por defecto si ninguna otra regla coincide.",
+    "priority": 1,
+    "conditions": [
+      {
+        "fact": "InputText",
+        "operator": "evaluate_gval",
+        "value": "true"
+      }
+    ],
+    "action": {
+      "type": "generate_response",
+      "responsePayload": "No he podido procesar tu solicitud con las reglas actuales. Por favor, intenta reformularla."
+    }
+  }
+]
